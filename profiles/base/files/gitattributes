@@ -1,0 +1,13 @@
+# kmjHarness가 생성했습니다. 직접 수정하지 마세요 — 변경은 kmjh sync로.
+# 텍스트 파일은 저장소(index)에 LF로 보관하고, 체크아웃 시에는 OS 관례를 따른다.
+# 이걸 두면 "줄바꿈만 다른데 전체 파일이 변경돼 보이는" 현상이 사라진다.
+* text=auto
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary

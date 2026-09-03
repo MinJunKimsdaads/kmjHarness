@@ -1,0 +1,37 @@
+# kmjHarness가 생성했습니다. 직접 수정하지 마세요 — 변경은 kmjh sync로.
+#
+# 이 파일은 하네스 전용입니다. 레포의 기존 ci.yml 과는 별개로 나란히 돕니다.
+# L1(경고 모드): 검증은 하되 실패해도 머지를 막지 않습니다.
+name: kmjh verify (warn)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: verify (경고 모드 — 실패해도 막지 않음)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        if: '{{PM_IS_PNPM}}'
+        uses: pnpm/action-setup@v4
+        with:
+          version: '{{PNPM}}'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '{{NODE}}'
+          cache: {{PM}}
+
+      - name: Install
+        run: {{INSTALL_CMD}}
+
+      - name: verify
+        run: {{VERIFY_CMD}}

@@ -1,0 +1,20 @@
+# kmjHarness가 생성했습니다. 직접 수정하지 마세요 — 변경은 kmjh sync로.
+#
+# 이 파일은 하네스 전용입니다. 레포의 기존 ci.yml 과는 별개로 나란히 돕니다.
+# 검증 로직은 {{REPO}} 한 곳에 있습니다 — 고칠 일이 생기면 거기서 고칩니다.
+name: kmjh verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    uses: {{REPO}}/.github/workflows/verify.yml@{{REF}}
+    with:
+      package-manager: {{PM}}
+      node-version: '{{NODE}}'
+    secrets: inherit

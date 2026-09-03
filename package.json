@@ -1,0 +1,18 @@
+{
+  "name": "kmjharness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "모든 프로젝트에 공통 적용되는 개발 표준·자동화 하네스",
+  "bin": {
+    "kmjh": "./cli/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "kmjh": "node cli/index.js",
+    "dashboard": "node cli/index.js dashboard",
+    "dashboard:watch": "node --watch cli/index.js dashboard"
+  }
+}

@@ -1,0 +1,23 @@
+# kmjHarness 자체 점검. 의존성이 없으므로 문법 검사만 한다.
+name: selfcheck
+on:
+  push: { branches: [main] }
+  pull_request: { branches: [main] }
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: 모든 JS 파일 문법 검사
+        run: |
+          set -e
+          find core cli server profiles -name '*.js' -print0 | while IFS= read -r -d '' f; do
+            node --check "$f" || node -e "import('./$f')" 
+          done
+          echo "문법 이상 없음"
+      - name: CLI 기동 확인
+        run: node cli/index.js help

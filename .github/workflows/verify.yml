@@ -1,0 +1,76 @@
+# kmjHarness 공용 검증 워크플로.
+# 각 레포는 이 파일을 호출만 하면 되고, CI 로직을 고칠 일이 생기면 여기 한 곳만 고친다.
+#
+# 호출 예:
+#   jobs:
+#     verify:
+#       uses: MinJunKimsdaads/kmjHarness/.github/workflows/verify.yml@main
+#       with:
+#         package-manager: pnpm
+#         node-version: '22'
+name: verify
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: '사용할 Node 버전'
+        type: string
+        default: '22'
+      package-manager:
+        description: 'pnpm | npm | yarn'
+        type: string
+        default: 'pnpm'
+      pnpm-version:
+        description: 'package-manager가 pnpm일 때 쓸 버전'
+        type: string
+        default: '10'
+      working-directory:
+        description: '레포 안에서 실행할 위치'
+        type: string
+        default: '.'
+      upload-dist:
+        description: '빌드 결과를 아티팩트로 올린다. 배포 job이 needs로 받아 쓸 수 있다.'
+        type: boolean
+        default: false
+      dist-path:
+        description: 'upload-dist가 true일 때 올릴 경로'
+        type: string
+        default: 'dist'
+
+jobs:
+  verify:
+    name: lint · typecheck · test · build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ inputs.pnpm-version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: Install
+        run: ${{ inputs.package-manager == 'pnpm' && 'pnpm install --frozen-lockfile' || (inputs.package-manager == 'yarn' && 'yarn install --immutable' || 'npm ci') }}
+
+      # verify 하나가 lint · typecheck · test · build를 모두 돈다.
+      # 스택이 무엇이든 이 이름은 모든 레포에서 같다 — 그게 이 하네스의 핵심 계약이다.
+      - name: verify
+        run: ${{ inputs.package-manager == 'npm' && 'npm run verify' || format('{0} verify', inputs.package-manager) }}
+
+      - name: Upload dist
+        if: inputs.upload-dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: ${{ inputs.working-directory }}/${{ inputs.dist-path }}
+          retention-days: 1
