@@ -9,7 +9,10 @@ import { readWorkspace, readRepoConfig, handshake } from './registry.js';
 const git = (dir, args) => {
   try {
     // trim()을 쓰면 `git status --porcelain` 첫 줄의 선행 공백(' M')이 날아가 상태 판정이 어긋난다.
-    return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).replace(/\s+$/, '');
+    // --no-optional-locks: status 등이 인덱스를 갱신하려고 .git/index.lock 을 만드는 것을 막는다.
+    // 읽기만 하는 도구가 잠금 파일을 남기면, 정리에 실패했을 때 사용자의 git 작업이 통째로 막힌다.
+    return execFileSync('git', ['--no-optional-locks', '-C', dir, ...args],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).replace(/\s+$/, '');
   } catch { return null; }
 };
 
