@@ -160,6 +160,21 @@ export function diagnose(repo) {
       detail: '표준은 Tailwind입니다. 기존 코드는 유지하고 신규 컴포넌트만 Tailwind로 작성하세요.', fix: 'src/styles/vendor/ 로 격리' });
   }
 
+  // — 공용 린트 설정이 실제로 쓰이고 있는가
+  // 레포에 이미 flat config가 있으면 하네스는 루트 파일을 덮어쓰지 않는다.
+  // 그러면 벤더링된 공용 설정이 아무도 안 읽는 죽은 파일이 되므로 여기서 잡는다.
+  const sharedLint = path.join(repo.dir, '.kmjharness', 'eslint.config.js');
+  const rootLint = path.join(repo.dir, 'eslint.config.js');
+  if (exists(sharedLint) && exists(rootLint)) {
+    const root = fs.readFileSync(rootLint, 'utf8');
+    if (!root.includes('.kmjharness/eslint.config.js')) {
+      f.push({ id: 'lint-not-shared', sinceLevel: 3, severity: 'warn', title: '공용 린트 설정이 적용되지 않음',
+        detail: '.kmjharness/eslint.config.js 를 배포했지만 루트 eslint.config.js 가 그것을 import 하지 않습니다. '
+              + '지금은 이 레포만의 규칙으로 돌고 있습니다.',
+        fix: "루트 eslint.config.js 를 `import harness from './.kmjharness/eslint.config.js'` 로 바꾸기" });
+    }
+  }
+
   // — CI (하네스 전용 워크플로. 레포의 ci.yml 은 건드리지 않는다)
   const wfPath = path.join(repo.dir, '.github', 'workflows', 'kmjh-verify.yml');
   if (!exists(wfPath)) {

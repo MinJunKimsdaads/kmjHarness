@@ -82,6 +82,19 @@ function existingUserSection(repo) {
 
 // ── package.json 변형 ────────────────────────────────────────
 // L2와 L3가 같은 파일을 건드리므로, 변형을 순서대로 쌓고 마지막에 한 번만 액션으로 만든다.
+// 선언된 버전 범위를 비교한다. 표준은 '최소선'이지 '고정값'이 아니다.
+// 같은 메이저에서 레포가 표준보다 앞서 있으면 그대로 둔다 — 앞선 레포를 뒤로 끌어당기면 안 된다.
+const semver = (r) => String(r || '').replace(/^[\^~>=<\s]+/, '').split('.').map((n) => parseInt(n, 10) || 0);
+function aheadOrEqual(current, standard) {
+  const c = semver(current), s = semver(standard);
+  if (c[0] !== s[0]) return false;                       // 메이저가 다르면 표준을 따른다
+  for (let i = 0; i < 3; i++) {
+    if ((c[i] ?? 0) > (s[i] ?? 0)) return true;
+    if ((c[i] ?? 0) < (s[i] ?? 0)) return false;
+  }
+  return true;                                           // 같으면 그대로
+}
+
 function transformPackage(repo, level) {
   const pkg = JSON.parse(JSON.stringify(repo.pkg));
   const pm = repo.packageManager === 'none' ? 'npm' : repo.packageManager;
@@ -92,40 +105,49 @@ function transformPackage(repo, level) {
     const added = [];
     const put = (name, value) => { if (!(name in s)) { s[name] = value; added.push(name); } };
     if (s['type-check'] && !s['typecheck']) put('typecheck', s['type-check']);
+
+    // test 가 watch 모드면 verify 가 CI에서 영원히 멈춘다. 이건 반드시 고쳐야 한다.
+    // 원래 값은 test:watch 로 보존하므로 잃는 것이 없다.
+    if (s.test && !/\brun\b/.test(s.test)) {
+      const oneShot = s['test:run'] || s.test.replace(/^(\S+)/, '$1 run');
+      if (!s['test:watch']) { s['test:watch'] = s.test; added.push('test:watch'); }
+      notes.push(`test 를 1회 실행으로 교체 ("${s.test}" → "${oneShot}", 원래 값은 test:watch 로 보존) — watch 모드면 verify가 CI에서 멈춘다`);
+      s.test = oneShot;
+    }
+
     put('lint', 'eslint .');
     put('lint:fix', 'eslint . --fix');
     put('format', 'prettier --write .');
     put('format:check', 'prettier --check .');
     if (s.test) put('test:watch', s.test.replace(/\s+run\b/, ''));
     put('test:coverage', (s.test || 'vitest run') + ' --coverage');
+
     const chain = ['lint', 'typecheck', 'test', 'build'].filter((n) => n in s);
     put('verify', chain.map((n) => runCmd(pm, n)).join(' && '));
     if (added.length) notes.push(`스크립트 ${added.length}개 추가: ${added.join(', ')}`);
   }
 
   if (level >= 3) {
-    // ESLint 9 flat config는 --ext 옵션을 없앴다. 남아 있으면 실행 자체가 실패한다.
     const fixed = [];
     for (const k of ['lint', 'lint:fix']) {
-      if (s[k] && /--ext\b/.test(s[k])) {
-        s[k] = s[k].replace(/\s*--ext\s+\S+/g, '');
-        fixed.push(k);
-      }
+      if (s[k] && /--ext\b/.test(s[k])) { s[k] = s[k].replace(/\s*--ext\s+\S+/g, ''); fixed.push(k); }
     }
     if (fixed.length) notes.push(`${fixed.join(', ')}에서 --ext 제거 (ESLint 9에서 삭제된 옵션)`);
 
     const lt = toolchain().lintToolchain || { add: {}, remove: [] };
     const dev = pkg.devDependencies || (pkg.devDependencies = {});
-    const changed = [];
+    const changed = [], kept = [];
     for (const [name, ver] of Object.entries(lt.add)) {
-      if (dev[name] !== ver) { changed.push(`${name}@${ver}`); dev[name] = ver; }
+      if (dev[name] === ver) continue;
+      if (dev[name] && aheadOrEqual(dev[name], ver)) { kept.push(name); continue; }   // 이미 표준 이상
+      changed.push(`${name}@${ver}`);
+      dev[name] = ver;
     }
     const removed = [];
-    for (const name of lt.remove) {
-      if (name in dev) { delete dev[name]; removed.push(name); }
-    }
+    for (const name of lt.remove) if (name in dev) { delete dev[name]; removed.push(name); }
     pkg.devDependencies = Object.fromEntries(Object.entries(dev).sort(([a], [b]) => a.localeCompare(b)));
     if (changed.length) notes.push(`린트 의존성 ${changed.length}개 갱신`);
+    if (kept.length) notes.push(`${kept.length}개는 이미 표준 이상이라 유지`);
     if (removed.length) notes.push(`구식 의존성 제거: ${removed.join(', ')}`);
   }
 
