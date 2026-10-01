@@ -6,17 +6,19 @@
 //  2) '없음'의 의미 — 그 레포가 원래 안 쓰는 패키지를 빨간 '없음'으로 띄우면 소음이 된다.
 //     프로파일이 요구하는 것만 없을 때 표시하고, 나머지는 설치된 경우에만 줄을 만든다.
 import { toolchain } from './paths.js';
+import { resolveLayers } from './profiles.js';
 
 const ROLE = {
   react: '프레임워크', 'react-dom': '프레임워크', next: '프레임워크',
   vite: '빌드', typescript: '언어', eslint: '린트', 'typescript-eslint': '린트',
   prettier: '포맷', vitest: '테스트', tailwindcss: '스타일',
-  'react-router-dom': '라우팅', zustand: '상태', electron: '데스크톱',
+  'react-router-dom': '라우팅', zustand: '상태', electron: '데스크톱', three: '렌더링',
 };
 
 // 프로파일별 '있어야 하는' 패키지. 여기 없는 것은 설치돼 있을 때만 비교한다.
 const REQUIRED = {
   'react-vite': ['react', 'react-dom', 'vite', 'typescript', 'eslint', 'prettier', 'vitest'],
+  game: ['react', 'react-dom', 'three', 'vite', 'typescript', 'eslint', 'prettier', 'vitest', 'zustand', 'react-router-dom', 'tailwindcss'],
   next: ['react', 'react-dom', 'next', 'typescript', 'eslint', 'prettier'],
   'node-service': ['eslint', 'prettier'],
   static: ['eslint', 'prettier'],
@@ -42,9 +44,13 @@ function compare(current, standard) {
 
 export function toolchainRows(repo) {
   const tc = toolchain();
-  const deps = { ...(repo.pkg?.dependencies || {}), ...(repo.pkg?.devDependencies || {}) };
-  const required = REQUIRED[repo.detectedProfile] ?? [];
-  const standards = { ...tc.versions, ...(tc.lintToolchain?.add || {}) };
+  // 모노레포면 scan.js 가 하위 패키지까지 합쳐 둔 목록을 쓴다
+  const deps = repo.deps ?? { ...(repo.pkg?.dependencies || {}), ...(repo.pkg?.devDependencies || {}) };
+  const required = REQUIRED[repo.profile ?? repo.detectedProfile] ?? [];
+  // 바깥 층(layers)이 더하는 버전은 하네스 표준에 없는 이름만 받는다 — 위층 표준을 아래층이 덮을 수 없다.
+  const layerVersions = Object.assign({}, ...resolveLayers(repo).filter((l) => l.ok).map((l) => l.versions));
+  const base = { ...tc.versions, ...(tc.lintToolchain?.add || {}) };
+  const standards = { ...Object.fromEntries(Object.entries(layerVersions).filter(([n]) => !(n in base))), ...base };
 
   const names = new Set([...required, ...Object.keys(deps).filter((n) => n in ROLE)]);
   const rows = [];
@@ -59,7 +65,7 @@ export function toolchainRows(repo) {
     rows.push({ name, group: ROLE[name] || '기타', current, standard, status });
   }
 
-  const ORDER = ['프레임워크', '라우팅', '상태', '스타일', '빌드', '언어', '린트', '포맷', '테스트', '데스크톱', '기타'];
+  const ORDER = ['프레임워크', '렌더링', '라우팅', '상태', '스타일', '빌드', '언어', '린트', '포맷', '테스트', '데스크톱', '기타'];
   rows.sort((a, b) => {
     const d = ORDER.indexOf(a.group) - ORDER.indexOf(b.group);
     return d !== 0 ? d : a.name.localeCompare(b.name);

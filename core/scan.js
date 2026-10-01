@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { workspaceRoot, harnessRoot, readJson } from './paths.js';
-import { detectProfile, detectAddons, detectPackageManager } from './detect.js';
+import { detectProfile, detectAddons, detectPackageManager, collectDeps } from './detect.js';
+import { profileExists } from './profiles.js';
 import { readWorkspace, readRepoConfig, handshake } from './registry.js';
 
 const git = (dir, args) => {
@@ -78,6 +79,13 @@ function scanRepo(name) {
   const cfg = readRepoConfig(name);
   const ws = readWorkspace();
 
+  // 모노레포면 하위 패키지 의존성까지 합쳐서 판정한다. 아니면 루트 package.json 그대로.
+  const { deps, monorepo, packages } = collectDeps(dir, pkg);
+  const detectedProfile = detectProfile({ pkg, hasHtml, hasDataOnly, deps });
+  // 레포가 kmjharness.json 에 프로파일을 선언했으면 그것이 우선이다.
+  // 감지 규칙이 늘어나도(예: game) 이미 편입된 레포의 프로파일이 저절로 바뀌지 않게 하기 위함.
+  const profile = cfg?.profile && profileExists(cfg.profile) ? cfg.profile : detectedProfile;
+
   return {
     name, dir,
     isGitRepo: files.includes('.git'),
@@ -88,8 +96,12 @@ function scanRepo(name) {
     dirtyCount: gitState.dirty,      // UI 호환용 요약값
     eolArtifact: gitState.eolOnly,
     pkg,
-    detectedProfile: detectProfile({ pkg, hasHtml, hasDataOnly }),
-    detectedAddons: detectAddons({ pkg }),
+    detectedProfile,
+    profile,
+    deps,
+    monorepo,
+    workspacePackages: packages,
+    detectedAddons: detectAddons({ pkg, deps }),
     packageManager: detectPackageManager(files),
     files,
     config: cfg,

@@ -1,0 +1,4 @@
+{
+  "$comment": "game 프로파일은 react-vite 를 물려받는다. AGENTS 조각은 react-vite 다음에 이어 붙고, 없는 파일은 react-vite 것을 쓴다.",
+  "extends": "react-vite"
+}

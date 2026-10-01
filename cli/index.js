@@ -27,7 +27,7 @@ function cmdList() {
     const dirty = r.dirtyCount ? ` ${C.y}±${r.dirtyCount}${C.x}` : '';
     console.log(
       r.name.padEnd(22) +
-      (r.detectedProfile + (r.detectedAddons.length ? ` +${r.detectedAddons.join(',')}` : '')).padEnd(24) +
+      ((r.profile ?? r.detectedProfile) + (r.detectedAddons.length ? ` +${r.detectedAddons.join(',')}` : '')).padEnd(24) +
       lvl.padEnd(8) + r.handshake.label.padEnd(16) + (r.branch || '—') + dirty + eol
     );
   }
@@ -44,7 +44,7 @@ function cmdDoctor() {
   for (const r of repos) {
     const d = diagnose(r);
     const s = d.summary;
-    console.log(`\n${C.b}${r.name}${C.x} ${C.d}(${r.detectedProfile}, ${r.level == null ? '미편입' : 'L' + r.level})${C.x}` +
+    console.log(`\n${C.b}${r.name}${C.x} ${C.d}(${r.profile ?? r.detectedProfile}, ${r.level == null ? '미편입' : 'L' + r.level})${C.x}` +
       `  ${C.r}${s.error} error${C.x}  ${C.y}${s.warn} warn${C.x}  ${C.d}${s.info} info${C.x}`);
     if (!d.findings.length) { console.log(`  ${C.g}이상 없음${C.x}`); continue; }
     for (const f of d.findings) {

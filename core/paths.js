@@ -5,7 +5,10 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 export const harnessRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const workspaceRoot = path.dirname(harnessRoot);
+// KMJH_WORKSPACE: 테스트·비교용으로 워크스페이스 위치를 바꿀 때만 쓴다. 평소엔 비워 둔다.
+export const workspaceRoot = process.env.KMJH_WORKSPACE
+  ? path.resolve(process.env.KMJH_WORKSPACE)
+  : path.dirname(harnessRoot);
 
 export const readJson = (p, fallback = null) => {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }

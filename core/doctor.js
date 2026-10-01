@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { toolchain, exists, readJson } from './paths.js';
 import { hash } from './apply.js';
 import { staleDeps } from './deps.js';
+import { resolveLayers } from './profiles.js';
 
 
 const REQUIRED_SCRIPTS = ['dev', 'build', 'lint', 'format', 'typecheck', 'test', 'verify'];
@@ -47,9 +48,22 @@ export function diagnose(repo) {
   }
 
   // — 프로파일
-  if (repo.detectedProfile === 'unknown') {
+  if ((repo.profile ?? repo.detectedProfile) === 'unknown') {
     f.push({ id: 'profile', sinceLevel: 0, severity: 'warn', title: '프로파일 판별 불가',
       detail: 'package.json 지문으로 유형을 특정하지 못했습니다.', fix: '수동 지정 필요' });
+  } else if (repo.profile && repo.profile !== repo.detectedProfile && repo.detectedProfile !== 'unknown') {
+    // 선언이 우선이므로 오류는 아니다. 의도한 것인지 사람이 한 번 보면 된다.
+    f.push({ id: 'profile-declared', sinceLevel: 0, severity: 'info',
+      title: `선언된 프로파일(${repo.profile})과 감지값(${repo.detectedProfile})이 다름`,
+      detail: 'kmjharness.json 의 profile 을 따릅니다. 전환할 때가 되면 profile 값을 바꾸고 다시 sync 하세요.', fix: '' });
+  }
+
+  // — 바깥 층 (kmjharness.json 의 layers)
+  for (const l of resolveLayers(repo)) {
+    if (!l.ok) {
+      f.push({ id: `layer:${l.name}`, sinceLevel: 0, severity: 'warn', title: `바깥 층 '${l.name}'을(를) 읽을 수 없음`,
+        detail: `${l.from || '(경로 없음)'} — ${l.problem}`, fix: 'kmjharness.json 의 layers 경로 확인' });
+    }
   }
 
   // — 에이전트 컨텍스트
@@ -135,7 +149,7 @@ export function diagnose(repo) {
   }
 
   // — 툴체인 버전 스큐
-  const deps = { ...(repo.pkg.dependencies || {}), ...(repo.pkg.devDependencies || {}) };
+  const deps = repo.deps ?? { ...(repo.pkg.dependencies || {}), ...(repo.pkg.devDependencies || {}) };
   for (const name of TRACKED) {
     if (!(name in deps)) continue;
     const want = tc.versions[name]; if (!want) continue;

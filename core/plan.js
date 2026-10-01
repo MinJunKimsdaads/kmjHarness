@@ -5,6 +5,7 @@ import path from 'node:path';
 import { harnessRoot, readJson, toolchain } from './paths.js';
 import { harnessVersion } from './registry.js';
 import { levelById } from './levels.js';
+import { profileFragments, profileFile, resolveLayers } from './profiles.js';
 
 const BEGIN = '<!-- kmjharness:begin — kmjh가 관리합니다. 직접 수정하지 마세요 -->';
 const END = '<!-- kmjharness:end -->';
@@ -58,12 +59,18 @@ function renderWorkflow(repo, level) {
 // 패키지 매니저마다 스크립트 호출 방식이 다르다. npm만 `run`이 필요하다.
 const runCmd = (pm, script) => (pm === 'npm' || pm === 'none' ? `npm run ${script}` : `${pm} ${script}`);
 
+// 레포가 선언한 프로파일이 우선, 없으면 감지값 (scan.js 참고)
+const profileOf = (repo) => repo.profile ?? repo.detectedProfile;
+
 // ── AGENTS.md ───────────────────────────────────────────────
 function buildAgentsMd(repo, userSection) {
   const pm = repo.packageManager === 'none' ? 'npm' : repo.packageManager;
   const base = (tpl('profiles', 'base', 'AGENTS.base.md') || '').replaceAll('{{PM}}', pm);
-  const frag = tpl('profiles', repo.detectedProfile, 'AGENTS.fragment.md') || '';
-  const managed = [BEGIN, '', base.trim(), '', frag.trim(), '', END].join('\n');
+  // 프로파일 조각은 상속 사슬을 따라 조상 → 자손 순으로 이어진다 (profile.json 이 없으면 자기 것 하나).
+  const frag = profileFragments(profileOf(repo));
+  // 바깥 층(kmjharness.json 의 layers)은 맨 끝에 붙는다. 못 읽은 층은 계획 경고로만 알린다.
+  const layers = resolveLayers(repo).filter((l) => l.ok).map((l) => l.fragment);
+  const managed = [BEGIN, '', base.trim(), '', frag.trim(), '', ...layers.flatMap((t) => [t, '']), END].join('\n');
   const user = (userSection || '').trim()
     || '## 이 프로젝트만의 규칙\n\n<!-- 여기부터는 당신의 영역입니다. kmjh는 이 아래를 건드리지 않습니다. -->\n';
   return `# ${repo.name}\n\n${managed}\n\n${user}\n`;
@@ -173,11 +180,16 @@ export function planLevel(repo, targetLevel) {
   const cfg = {
     $comment: 'kmjHarness 핸드셰이크 (프로젝트 측). kmjh가 관리합니다.',
     harness: harnessVersion(),
-    profile: repo.detectedProfile,
+    profile: profileOf(repo),
     addons: repo.detectedAddons,
     level: targetLevel,
     release: repo.config?.release ?? false,
+    // 바깥 층 선언은 사람이 적는 값이라 그대로 보존한다 (없으면 키 자체를 만들지 않는다)
+    ...(Array.isArray(repo.config?.layers) ? { layers: repo.config.layers } : {}),
   };
+  for (const l of resolveLayers(repo)) {
+    if (!l.ok) warnings.push(`바깥 층 '${l.name}'을(를) 읽지 못했습니다 — ${l.problem}`);
+  }
   acts.push(action(repo, 'kmjharness.json', JSON.stringify(cfg, null, 2) + '\n', 'update', '핸드셰이크 선언'));
 
   // L1 — 에이전트 컨텍스트 + 공통 파일
@@ -212,15 +224,15 @@ export function planLevel(repo, targetLevel) {
 
   // L3 — ESLint 9 flat config
   if (targetLevel >= 3) {
-    const shared = tpl('profiles', repo.detectedProfile, 'eslint.config.js');
+    const shared = profileFile(profileOf(repo), 'eslint.config.js');
     if (!shared) {
-      warnings.push(`${repo.detectedProfile} 프로파일에는 아직 공용 ESLint 설정이 없습니다.`);
+      warnings.push(`${profileOf(repo)} 프로파일에는 아직 공용 ESLint 설정이 없습니다.`);
     } else {
       acts.push(action(repo, '.kmjharness/eslint.config.js', shared, 'update', '공용 flat config', true));
 
       const rootRel = 'eslint.config.js';
       if (!read(path.join(repo.dir, rootRel))) {
-        acts.push(action(repo, rootRel, tpl('profiles', repo.detectedProfile, 'eslint.root.js'), 'create',
+        acts.push(action(repo, rootRel, profileFile(profileOf(repo), 'eslint.root.js'), 'create',
           '공용 설정을 import 하는 얇은 파일 — 프로젝트 예외는 여기에'));
       } else {
         acts.push({ rel: rootRel, kind: 'skip',

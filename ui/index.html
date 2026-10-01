@@ -281,7 +281,7 @@ function renderList() {
         <span class="dots">${dots}</span>
       </div>
       <div class="meta">
-        <span>${esc(r.detectedProfile)}${r.detectedAddons.length?' +'+r.detectedAddons.join(','):''}</span>
+        <span>${esc(r.profile||r.detectedProfile)}${r.detectedAddons.length?' +'+r.detectedAddons.join(','):''}</span>
         <span>${esc(r.packageManager)}</span>
         <span>${esc(r.branch||'—')}</span>
         ${r.git?.inMerge?`<span class="e">충돌 ${r.git.conflicted}</span>`:''}
@@ -674,7 +674,7 @@ function renderDetail(name) {
   $('#detail').className = 'detail';
   $('#detail').innerHTML = `
     <h2>${esc(r.name)}</h2>
-    <div class="sub">${esc(r.detectedProfile)}${r.detectedAddons.length?' +'+r.detectedAddons.join(','):''} · ${esc(r.packageManager)} · ${esc(r.branch||'—')} · ${esc(r.handshake.label)}</div>
+    <div class="sub">${esc(r.profile||r.detectedProfile)}${r.detectedAddons.length?' +'+r.detectedAddons.join(','):''} · ${esc(r.packageManager)} · ${esc(r.branch||'—')} · ${esc(r.handshake.label)}</div>
     ${gitBar(r)}
     <div class="sec">다음 할 일</div>
     ${stepsBox(r)}

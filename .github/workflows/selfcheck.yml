@@ -21,3 +21,5 @@ jobs:
           echo "문법 이상 없음"
       - name: CLI 기동 확인
         run: node cli/index.js help
+      - name: 자체 테스트
+        run: node --test test/*.test.js

@@ -13,6 +13,7 @@
   "scripts": {
     "kmjh": "node cli/index.js",
     "dashboard": "node cli/index.js dashboard",
-    "dashboard:watch": "node --watch cli/index.js dashboard"
+    "dashboard:watch": "node --watch cli/index.js dashboard",
+    "test": "node --test test/*.test.js"
   }
 }

@@ -48,7 +48,7 @@ export function applyPlan(repo, plan) {
   ws.harnessVersion = harnessVersion();
   ws.repos = ws.repos || {};
   ws.repos[repo.name] = {
-    profile: repo.detectedProfile,
+    profile: repo.profile ?? repo.detectedProfile,
     addons: repo.detectedAddons,
     level: plan.toLevel,
     lastSync: new Date().toISOString(),

@@ -107,7 +107,8 @@ node cli/index.js levels                      # 편입 레벨 설명
 ```
 core/        순수 로직. CLI와 UI가 공유하는 유일한 진실
   paths        하네스/워크스페이스 경로
-  detect       package.json 지문 → 프로파일 판별
+  detect       package.json 지문 → 프로파일 판별 (모노레포는 하위 패키지까지)
+  profiles     프로파일 상속(extends) · 바깥 층(layers)
   scan         레포 스캔 + git 상태 분류
   doctor       진단 규칙 (쓰기 없음)
   levels       편입 레벨 L0~L4 정의
@@ -122,10 +123,11 @@ cli/         터미널 인터페이스
 server/      로컬 API (127.0.0.1 전용) + UI 서빙
 ui/          대시보드 — 의존성 0인 단일 HTML
 profiles/    프로파일별 템플릿
-  base · react-vite · next · node-service · static · data
+  base · react-vite · game(react-vite 상속) · next · node-service · static · data
   addons/ electron · release
 toolchain.json   모든 툴체인 버전을 여기서만 관리
 docs/            ADR · 학습 문서 · CI 이관 가이드
+test/            자체 테스트 (node --test, 의존성 없음)
 ```
 
 ### 각 레포에 심어지는 것
@@ -143,6 +145,43 @@ your-repo/
 ├─ AGENTS.md               마커 안쪽은 kmjh, 바깥은 당신
 └─ CLAUDE.md               "@AGENTS.md" 한 줄
 ```
+
+---
+
+## 층 쌓기 — 프로파일 상속과 바깥 층
+
+규칙은 위에서 아래로 물려받습니다. 아래 층은 위 층의 언어·프레임워크·버전을 그대로 따르고 자기 규칙만 더합니다.
+
+```
+kmjHarness base  →  react-vite  →  game  →  (바깥 층) hacknslash  →  각 게임 레포
+     공통 규약        React 스택     three 캔버스      kmjHackNSlash/harness
+```
+
+**프로파일 상속** — `profiles/<이름>/profile.json` 에 `{ "extends": "부모" }` 를 두면
+
+- `AGENTS.md` 관리 블록에 조상 → 자손 순서로 조각이 이어 붙습니다.
+- `eslint.config.js` 같은 파일은 자식에 있으면 자식 것, 없으면 부모 것을 씁니다.
+- `profile.json` 이 없는 프로파일은 예전과 똑같이 동작합니다.
+
+**game 프로파일** — `react` + `vite` + `three` 가 함께 있으면 game 으로 감지됩니다.
+react-vite 규칙에 더해 "`rules/` 에서는 React·three·DOM 금지" 를 ESLint 오류로 막습니다.
+
+**선언이 감지보다 우선** — `kmjharness.json` 에 `profile` 이 적혀 있으면 감지 결과가 달라도 그것을 따릅니다.
+감지 규칙이 늘어나도 이미 편입된 레포가 저절로 다른 프로파일로 바뀌지 않게 하기 위함입니다.
+다를 때는 `doctor` 가 info 로 알려 줍니다.
+
+**바깥 층(layers)** — 하네스 밖에 원본을 둔 규칙을 붙입니다. 단일 출처는 복사하지 않습니다.
+
+```jsonc
+// 게임 레포의 kmjharness.json
+"layers": ["kmjHackNSlash/harness"]     // 워크스페이스(github2) 기준 경로
+```
+
+층 폴더에는 `AGENTS.fragment.md`(필수), `layer.json`(이름·버전), `toolchain.json`(이 층이 더하는 버전)을 둡니다.
+층은 하네스 표준에 없는 버전만 더할 수 있고, 위층 표준을 덮지 못합니다. 워크스페이스 밖을 가리키는 경로는 거부합니다.
+
+**모노레포** — `pnpm-workspace.yaml`(또는 `package.json` 의 `workspaces`)이 있으면
+하위 패키지 의존성까지 합쳐서 프로파일 감지와 버전 비교를 합니다. 스크립트 계약은 맨 위 `package.json` 기준입니다.
 
 ---
 
