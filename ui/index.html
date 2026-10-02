@@ -78,6 +78,9 @@
   .name { font-weight:600; }
   .meta { color:var(--sub); font-size:12px; }
   .meta .running { color:var(--accent); font-weight:600; }
+  .sync { font-size:11px; font-weight:700; border-radius:4px; padding:0 4px; cursor:help; }
+  .sync.up { background:var(--warnbg); color:var(--warn); }
+  .sync.down { background:var(--errbg); color:var(--err); }
   .lv { display:flex; align-items:center; gap:6px; }
   .bar { display:flex; gap:2px; }
   .bar i { width:14px; height:8px; border-radius:2px; background:var(--lvoff); }
@@ -420,6 +423,25 @@ function sortRows() {
   bodies.forEach((b) => $('#repos').appendChild(b));
 }
 
+// "3시간 전" — core/time.js 와 같은 규칙
+function agoKo(ms) {
+  if (ms == null) return null;
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return '방금';
+  if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+  if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+  return `${Math.floor(s / 86400)}일 전`;
+}
+const fetchAge = (g) => (g?.lastFetch ? `마지막 fetch: ${agoKo(g.lastFetch)}` : 'fetch 기록 없음');
+
+// 브랜치 옆 ↑N(push 안 됨) · ↓N(뒤처짐). 대시보드는 fetch 하지 않으므로 마지막 fetch 기준이다.
+function syncBadges(g) {
+  if (!g) return '';
+  const up = g.upstream ? ` (${g.upstream})` : '';
+  return (g.ahead > 0 ? ` <span class="sync up" title="${esc(`push 안 된 커밋 ${g.ahead}개${up} · ${fetchAge(g)}`)}">↑${g.ahead}</span>` : '')
+    + (g.behind > 0 ? ` <span class="sync down" title="${esc(`GitHub보다 커밋 ${g.behind}개 뒤처짐${up} · ${fetchAge(g)}`)}">↓${g.behind}</span>` : '');
+}
+
 function levelBar(level) {
   const lv = level ?? -1;
   return `<div class="lv"><span class="bar">${[0, 1, 2, 3, 4].map((i) => `<i class="${i <= lv ? 'on' : ''}"></i>`).join('')}</span>
@@ -431,7 +453,7 @@ function rowHtml(r) {
   const t = d?.nowTask;
   const running = d?.job?.status === 'running' || RUNNING.has(r.name);
   const meta = [`${esc(r.profile)}${r.addons?.length ? ' +' + esc(r.addons.join(',')) : ''}`, esc(r.packageManager)];
-  if (d?.branch) meta.push(esc(d.branch));
+  if (d?.branch) meta.push(esc(d.branch) + syncBadges(d.git));
   if (running) meta.push(`<span class="running">${d?.job?.script === 'install' ? '설치' : '실행'} 중</span>`);
 
   let status, todo, act = '';
@@ -477,8 +499,9 @@ function drawerHtml(r, d) {
   const lv = d.level ?? -1, t = d.nowTask, g = d.git || {};
   const fs = d.diagnosis.findings;
   // 지금 할 일: 오류·경고와 미커밋 / 나중에: 레벨을 올리면 해결되는 예고 / 참고: 나머지 정보
-  const now = fs.filter((f) => f.severity !== 'info' || f.id === 'dirty');
-  const later = fs.filter((f) => f.severity === 'info' && f.id !== 'dirty' && f.sinceLevel > lv && f.sinceLevel >= 1);
+  const NOW_INFO = new Set(['dirty', 'behind', 'ahead']);     // info 지만 지금 손댈 것
+  const now = fs.filter((f) => f.severity !== 'info' || NOW_INFO.has(f.id));
+  const later = fs.filter((f) => f.severity === 'info' && !NOW_INFO.has(f.id) && f.sinceLevel > lv && f.sinceLevel >= 1);
   const note = fs.filter((f) => !now.includes(f) && !later.includes(f));
   const byLevel = {};
   for (const f of later) (byLevel[f.sinceLevel] ??= []).push(f);
@@ -500,7 +523,7 @@ function drawerHtml(r, d) {
     </div>
     <div class="side"><h3>순서</h3><div class="steps"><ol>${(d.order || []).map((o) => `<li class="${esc(o.state)}"><span class="s">${MARK[o.state] ?? '○'}</span>${esc(o.label)}</li>`).join('')}</ol></div>
       ${cur ? `<p class="dim">지금 L${cur.id} ${esc(cur.label ?? cur.name)} — ${esc(cur.short ?? cur.summary)}</p>` : ''}
-      <p class="dim">${esc(d.branch || '브랜치 없음')}${d.lastCommit ? ' · ' + esc(d.lastCommit) : ''}${g.eolNoise ? ` · 줄바꿈 차이만 있는 파일 ${g.eolNoise}개` : ''}</p>
+      <p class="dim">${esc(d.branch || '브랜치 없음')}${d.lastCommit ? ' · ' + esc(d.lastCommit) : ''}${g.eolNoise ? ` · 줄바꿈 차이만 있는 파일 ${g.eolNoise}개` : ''}${g.upstream ? ` · ${esc(g.upstream)} 추적, ${esc(fetchAge(g))}` : ''}</p>
       ${tcRows.length ? `<details data-k="versions" style="margin-top:8px"><summary>버전 비교 — ${off ? `${off}개가 표준과 다름` : '모두 표준과 같음'}</summary>
         <table class="tc"><thead><tr><th>패키지</th><th>현재</th><th>표준</th><th></th></tr></thead><tbody>
         ${tcRows.map((x) => `<tr><td>${esc(x.name)}</td><td class="v">${esc(x.current ?? '—')}</td><td class="v">${esc(x.standard ?? '—')}</td><td><span class="vs ${esc(x.status)}">${esc(VS_KO[x.status] ?? x.status)}</span></td></tr>`).join('')}

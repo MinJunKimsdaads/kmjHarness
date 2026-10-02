@@ -8,6 +8,7 @@ import { staleDeps } from './deps.js';
 import { resolveLayers } from './profiles.js';
 import { oneShotTest, testRunner } from './testscript.js';
 import { OP_LABEL } from './scan.js';
+import { agoKo } from './time.js';
 
 
 const REQUIRED_SCRIPTS = ['dev', 'build', 'lint', 'format', 'typecheck', 'test', 'verify'];
@@ -105,6 +106,16 @@ export function diagnose(repo) {
     if (g.untracked) parts.push(`untracked ${g.untracked}`);
     f.push({ id: 'dirty', sinceLevel: 0, severity: 'info', title: `미커밋 변경 ${g.dirty}건`,
       detail: `${parts.join(' · ')}${g.summary ? ' —' + g.summary : ''}. 적용 전에 커밋하거나 stash 하는 것을 권합니다.`, fix: '' });
+  }
+  // GitHub(추적 브랜치)과의 차이 — 정보로만. fetch 는 하지 않으므로 마지막 fetch 시점 기준이다.
+  const asOf = g.lastFetch ? `마지막 fetch ${agoKo(g.lastFetch)} 기준` : 'fetch 기록 없음 — 오래된 숫자일 수 있음';
+  if (g.behind > 0) {
+    f.push({ id: 'behind', sinceLevel: 0, severity: 'info', title: `GitHub보다 커밋 ${g.behind}개 뒤처짐`,
+      detail: `${g.upstream ?? '추적 브랜치'}에 이 레포에 없는 커밋이 있습니다 (${asOf}).`, fix: 'git pull' });
+  }
+  if (g.ahead > 0) {
+    f.push({ id: 'ahead', sinceLevel: 0, severity: 'info', title: `push 안 된 커밋 ${g.ahead}개`,
+      detail: `${g.upstream ?? '추적 브랜치'}에 아직 없는 커밋입니다 (${asOf}).`, fix: 'git push' });
   }
   if (g.eolNoise > 0) {
     f.push({ id: 'eol', sinceLevel: 0, severity: 'info', title: `줄바꿈 차이만 있는 파일 ${g.eolNoise}개`,

@@ -119,6 +119,13 @@ export function nowTask(repo, diagnosis = null, deps = null, { pendingSync = 0, 
       why: n ? `package.json 에 적힌 것과 설치된 것이 ${n}개 다릅니다. 이대로면 verify 가 실패합니다.`
              : 'package.json 에 적힌 것과 설치된 것이 다릅니다.' };
   }
+  // GitHub(추적 브랜치)에 새 커밋이 있다 — 커밋·적용하기 전에 pull 부터 (마지막 fetch 기준)
+  if (g.behind > 0) {
+    return { kind: 'do', step: 'git', action: null, text: `GitHub보다 커밋 ${g.behind}개 뒤처짐 — 먼저 git pull`,
+      why: '다른 곳에서 올린 커밋이 있습니다. 커밋하거나 하네스를 적용하기 전에 먼저 pull 해야 충돌을 피합니다.'
+        + (g.dirty > 0 ? ` 커밋 안 된 변경이 ${g.dirty}건 있으니 먼저 커밋하거나 git stash 한 뒤 pull 하세요.` : '')
+        + ' (숫자는 마지막 fetch 기준입니다)' };
+  }
   if (level != null && level >= DIRTY_BLOCKS_FROM && g.dirty > 0) {
     return { kind: 'do', step: 'git', action: null, text: `미커밋 변경 ${g.dirty}건 커밋하기`,
       why: '하네스 작업과 섞이지 않게 먼저 커밋해 두세요.' };
@@ -150,6 +157,11 @@ export function nowTask(repo, diagnosis = null, deps = null, { pendingSync = 0, 
     return { kind: 'next', step: 'level', action: 'promote', toLevel: level + 1, text: `L${level + 1}로 올리기`,
       why: levelById(level + 1).short ?? levelById(level + 1).summary };
   }
+  // 커밋은 됐지만 GitHub 에 없다. push 는 사용자가 자기 인증으로 한다 — 대시보드는 버튼을 주지 않는다.
+  if (g.ahead > 0) {
+    return { kind: 'do', step: 'push', action: null, text: `push 안 된 커밋 ${g.ahead}개 — git push`,
+      why: '커밋은 됐지만 GitHub에는 아직 없습니다. 레포 폴더에서 git push 하세요.' };
+  }
   return { kind: 'done', step: null, action: null, text: '할 일 없음' };
 }
 
@@ -164,6 +176,7 @@ export function orderSteps(repo, deps, task, { pendingSync = 0, job = null } = {
   const add = (id, label, state) => out.push({ id, label, state: task?.step === id ? 'now' : state });
 
   if (g.inMerge) add('git', task?.step === 'git' ? task.text : '병합 마무리', 'wait');
+  else if (g.behind > 0) add('git', `pull 필요 (↓${g.behind})${g.dirty > 0 ? ` — 미커밋 ${g.dirty}건은 먼저 커밋·stash` : ''}`, 'wait');
   else if (g.dirty > 0) {
     add('git', level != null && level >= DIRTY_BLOCKS_FROM ? `미커밋 변경 ${g.dirty}건 커밋` : `미커밋 변경 ${g.dirty}건 (적용 전에 커밋 권장)`, 'wait');
   } else add('git', '커밋 안 된 변경 없음', 'done');
@@ -182,12 +195,21 @@ export function orderSteps(repo, deps, task, { pendingSync = 0, job = null } = {
   if (level != null && level >= TOP_LEVEL) add('level', `최고 레벨 (L${TOP_LEVEL + 1} 준비 중)`, 'done');
   else add('level', level == null ? 'L0 등록' : `L${level + 1}로 올리기`, 'wait');
 
+  // GitHub 과의 동기 상태 (추적 브랜치가 있을 때만 알 수 있다)
+  if (repo.isGitRepo) {
+    if (g.ahead == null) add('push', 'GitHub 추적 브랜치 없음', 'skip');
+    else if (g.ahead > 0) add('push', `push 필요 (↑${g.ahead})`, 'wait');
+    else if (g.behind > 0) add('push', 'GitHub와 맞추기 — pull 뒤', 'wait');
+    else add('push', 'GitHub와 같음', 'done');
+  }
+
   return out;
 }
 
 // "지금 할 일" 하나에 가려지는 다른 오류·경고. 현황표 한 줄에 "+경고 N" 으로 붙인다.
 // nowTask 가 이미 다루는 것(병합·금지 의존성·설치·핸드셰이크)은 빼고 센다.
-const COVERED = new Set(['merge-conflict', 'banned-deps', 'deps-stale', 'handshake']);
+// ahead/behind 는 info 라 원래 세지 않지만, 혹시 등급이 바뀌어도 '+경고' 에 섞이지 않게 명시한다.
+const COVERED = new Set(['merge-conflict', 'banned-deps', 'deps-stale', 'handshake', 'behind', 'ahead']);
 export function otherIssues(diagnosis) {
   return (diagnosis?.findings || [])
     .filter((f) => (f.severity === 'error' || f.severity === 'warn') && !COVERED.has(f.id))

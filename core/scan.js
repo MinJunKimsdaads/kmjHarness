@@ -20,6 +20,11 @@ const GIT_QUERIES = {
   shortstat: ['diff', '--ignore-cr-at-eol', '--shortstat'],
   // 진행 중인 병합·리베이스·체리픽의 흔적 파일 위치 (워크트리면 절대 경로로 나온다)
   opPaths: ['rev-parse', ...OP_MARKERS().flatMap(([, f]) => ['--git-path', f])],
+  // 추적 브랜치(upstream)와의 차이 "뒤처짐\t앞섬". 추적 브랜치가 없거나 HEAD 가 분리돼 있으면 git 이 실패 → null.
+  // git fetch 는 절대 하지 않는다 (네트워크·인증 없음). 숫자는 '마지막 fetch 기준'이다.
+  aheadBehind: ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'],
+  upstream: ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+  fetchHead: ['rev-parse', '--git-path', 'FETCH_HEAD'],
 };
 function OP_MARKERS() {
   return [['merge', 'MERGE_HEAD'], ['rebase', 'rebase-merge'], ['rebase', 'rebase-apply'],
@@ -78,6 +83,19 @@ const pathOf = (line) => {
   return (arrow >= 0 ? rest.slice(arrow + 4) : rest).replace(/^"|"$/g, '');
 };
 
+// 추적 브랜치와의 차이. 숫자를 못 얻으면(추적 브랜치 없음 · 분리된 HEAD · git 아님) 모두 null.
+function remoteState(dir, facts) {
+  const m = /^(\d+)\s+(\d+)$/.exec(facts.aheadBehind || '');
+  let lastFetch = null;
+  if (facts.fetchHead) { try { lastFetch = fs.statSync(path.resolve(dir, facts.fetchHead)).mtimeMs; } catch { /* fetch 한 적 없음 */ } }
+  return {
+    upstream: m ? (facts.upstream || null) : null,
+    behind: m ? Number(m[1]) : null,
+    ahead: m ? Number(m[2]) : null,
+    lastFetch,
+  };
+}
+
 function classifyStatus(dir, facts) {
   const statusRaw = facts.status;
   const lines = statusRaw ? statusRaw.split('\n').filter(Boolean) : [];
@@ -110,6 +128,7 @@ function classifyStatus(dir, facts) {
     inMerge: conflict.size > 0 || operation !== null,
     operation,
     summary: facts.shortstat || null,
+    ...remoteState(dir, facts),
   };
 }
 
