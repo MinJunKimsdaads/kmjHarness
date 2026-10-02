@@ -501,7 +501,7 @@ function drawerHtml(r, d) {
         </tbody></table></details>` : ''}
       <div class="acts">
         ${d.scripts?.verify ? `<button class="btn sm" data-act="verify">verify 실행</button>` : ''}
-        ${d.level == null ? `<button class="btn sm" data-act="exclude" title="이 머신에서만 목록에서 뺍니다 (workspace.json)">이 폴더 제외</button>` : ''}
+        <button class="btn sm" data-act="exclude" title="이 머신에서만 목록에서 뺍니다 (workspace.json). 레포 파일은 그대로이고, 표 아래 '제외한 폴더'에서 다시 넣을 수 있습니다.">이 폴더 제외</button>
         <span class="dim" style="font-size:12px">파일 단위로 보기: <code>kmjh plan ${esc(r.name)}</code></span>
       </div>
     </div>
@@ -890,7 +890,7 @@ function renderGuide() {
       <li><strong>install이 frozen-lockfile로 실패합니다</strong> — 하네스는 <code>--no-frozen-lockfile</code>로 실행합니다. 그래도 실패하면 로그를 확인하세요.</li>
       <li><strong>버튼이 없습니다</strong> — '막힘'(머지 충돌 · 금지 의존성)이거나 '먼저 커밋'처럼 사람이 할 일이거나, 다음 레벨이 아직 구현되지 않은 경우입니다.</li>
       <li><strong>적용했는데 verify가 실패합니다</strong> — 설치가 실패하지 않았는지 먼저 보세요. 그 외에는 원래 있던 문제가 이제 드러난 것입니다.</li>
-      <li><strong>하네스와 상관없는 폴더가 목록에 보입니다</strong> — 줄을 펼쳐 <strong>[이 폴더 제외]</strong>를 누르세요. 표 아래 '제외한 폴더'에서 다시 넣을 수 있습니다.</li>
+      <li><strong>하네스와 상관없거나 지금은 손대지 않을 폴더가 목록에 보입니다</strong> — 줄을 펼쳐 <strong>[이 폴더 제외]</strong>를 누르세요. 표 아래 '제외한 폴더'에서 다시 넣을 수 있습니다.</li>
       <li><strong>레포 목록이 비어 있습니다</strong> — 이 레포가 관리 대상들과 같은 폴더에 있어야 합니다. 부모 폴더를 워크스페이스로 봅니다.</li>
     </ul>`;
 }
