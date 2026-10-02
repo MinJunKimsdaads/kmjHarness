@@ -6,7 +6,7 @@
 //   3. 통과했으면 다음 레벨로 승급
 import fs from 'node:fs';
 import path from 'node:path';
-import { levelById, LEVELS } from './levels.js';
+import { levelById, LEVELS, TOP_LEVEL } from './levels.js';
 import { harnessVersion } from './registry.js';
 
 const mtime = (p) => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } };
@@ -81,9 +81,16 @@ export function nextSteps(repo, deps, job, pendingSync = 0) {
 //   8. 구현된 최고 레벨 미만 → next  한 칸 올리기 (구현 안 된 레벨은 절대 권하지 않는다)
 //   9. 그 외             → done
 //
-// 반환: { kind: 'block'|'do'|'next'|'done', text, action: null|'install'|'sync'|'promote'|'verify', toLevel?, why? }
-const TOP_LEVEL = Math.max(...LEVELS.filter((l) => l.implemented).map((l) => l.id));
+// 반환: { kind: 'block'|'do'|'next'|'done', step, text, action: null|'install'|'sync'|'promote'|'verify', toLevel?, why? }
+//   step: 아래 orderSteps 의 어느 칸이 '지금'인지 (git · banned · install · sync · verify · level · null)
 const DIRTY_BLOCKS_FROM = 3;
+const OP_KO = { merge: '병합', rebase: '리베이스', 'cherry-pick': '체리픽', revert: '되돌리기(revert)' };
+
+const verifyFailedFresh = (repo, job) => Boolean(job && job.script === 'verify'
+  && (job.status === 'failed' || job.status === 'error') && (job.endedAt ?? 0) > changedAt(repo));
+const verifyPassedFresh = (repo, job) => Boolean(job && job.script === 'verify'
+  && job.status === 'passed' && (job.endedAt ?? 0) > changedAt(repo));
+const syncDue = (repo, pendingSync) => repo.level != null && (repo.handshake?.state === 'stale' || pendingSync > 0);
 
 export function nowTask(repo, diagnosis = null, deps = null, { pendingSync = 0, job = null } = {}) {
   const findings = diagnosis?.findings || [];
@@ -92,45 +99,79 @@ export function nowTask(repo, diagnosis = null, deps = null, { pendingSync = 0, 
   const level = repo.level ?? null;
 
   if (g.inMerge || has('merge-conflict')) {
-    return { kind: 'block', action: null,
-      text: g.conflicted ? `머지 충돌 ${g.conflicted}개 파일 해결하기` : '머지 충돌 해결하기',
-      why: '병합이 끝나지 않은 레포에는 하네스를 적용하지 않습니다. 충돌을 해결해 커밋하거나 git merge --abort 하세요.' };
+    const op = OP_KO[g.operation] ?? '병합';
+    return { kind: 'block', step: 'git', action: null,
+      text: g.conflicted ? `머지 충돌 ${g.conflicted}개 파일 해결하기` : `진행 중인 ${op} 마무리하기`,
+      why: g.conflicted
+        ? '병합이 끝나지 않은 레포에는 하네스를 적용하지 않습니다. 충돌을 해결해 커밋하거나 git merge --abort 하세요.'
+        : `${op}이 아직 끝나지 않았습니다. 커밋(또는 --continue)하거나 --abort 한 뒤에 하네스를 적용할 수 있습니다.` };
   }
   const banned = has('banned-deps');
   if (banned) {
-    return { kind: 'block', action: null, text: `${banned.title} 지우기`,
+    return { kind: 'block', step: 'banned', action: null, text: `${banned.title} 지우기`,
       why: 'Node 내장 모듈 이름을 흉내 낸 가짜 패키지입니다. package.json 에서 직접 지워 주세요.' };
   }
   const needsInstall = deps ? deps.needsInstall : Boolean(has('deps-stale'));
   if (needsInstall) {
     const n = deps ? deps.stale.length + deps.missing.length : 0;
-    return { kind: 'do', action: 'install', text: '의존성 설치',
+    return { kind: 'do', step: 'install', action: 'install', text: '의존성 설치',
       why: n ? `package.json 에 적힌 것과 설치된 것이 ${n}개 다릅니다. 이대로면 verify 가 실패합니다.`
              : 'package.json 에 적힌 것과 설치된 것이 다릅니다.' };
   }
   if (level != null && level >= DIRTY_BLOCKS_FROM && g.dirty > 0) {
-    return { kind: 'do', action: null, text: `미커밋 변경 ${g.dirty}건 커밋하기`,
+    return { kind: 'do', step: 'git', action: null, text: `미커밋 변경 ${g.dirty}건 커밋하기`,
       why: '하네스 작업과 섞이지 않게 먼저 커밋해 두세요.' };
   }
-  if (level != null && (repo.handshake?.state === 'stale' || pendingSync > 0)) {
+  if (syncDue(repo, pendingSync)) {
     const stale = repo.handshake?.state === 'stale';
-    return { kind: 'do', action: 'sync', toLevel: level,
+    return { kind: 'do', step: 'sync', action: 'sync', toLevel: level,
       text: stale ? `표준 다시 적용 (하네스 ${repo.config?.harness ?? '?'} → ${harnessVersion()})`
                   : `표준 다시 적용 — ${pendingSync}개 파일이 표준과 다름`,
       why: `L${level} 을 다시 적용해 하네스의 새 표준을 반영합니다. 레벨은 그대로입니다.` };
   }
-  if (job && job.script === 'verify' && (job.status === 'failed' || job.status === 'error')
-      && (job.endedAt ?? 0) > changedAt(repo)) {
-    return { kind: 'do', action: 'verify', text: 'verify 실패 고치기',
+  if (verifyFailedFresh(repo, job)) {
+    return { kind: 'do', step: 'verify', action: 'verify', text: 'verify 실패 고치기',
       why: '마지막 verify 가 실패했습니다. 원인을 고친 뒤 다시 확인하세요. 통과해야 다음 레벨을 권합니다.' };
   }
   if (level == null) {
-    return { kind: 'next', action: 'promote', toLevel: 0, text: 'L0 등록 — 파일을 건드리지 않음',
+    return { kind: 'next', step: 'level', action: 'promote', toLevel: 0, text: 'L0 등록 — 파일을 건드리지 않음',
       why: levelById(0).short };
   }
   if (level < TOP_LEVEL) {
-    return { kind: 'next', action: 'promote', toLevel: level + 1, text: `L${level + 1}로 올리기`,
+    return { kind: 'next', step: 'level', action: 'promote', toLevel: level + 1, text: `L${level + 1}로 올리기`,
       why: levelById(level + 1).short ?? levelById(level + 1).summary };
   }
-  return { kind: 'done', action: null, text: '할 일 없음' };
+  return { kind: 'done', step: null, action: null, text: '할 일 없음' };
+}
+
+// ── 순서 ─────────────────────────────────────────────────────
+// 대시보드 펼침의 '순서' 목록. nowTask 와 같은 데이터로 만들어, '지금(now)' 칸은 언제나 nowTask 가 고른 그 칸이다.
+// 반환: [{ id, label, state: 'done'|'now'|'wait'|'skip' }]
+export function orderSteps(repo, deps, task, { pendingSync = 0, job = null } = {}) {
+  const g = repo.git || {};
+  const level = repo.level ?? null;
+  const hasPkg = Boolean(repo.pkg);
+  const out = [];
+  const add = (id, label, state) => out.push({ id, label, state: task?.step === id ? 'now' : state });
+
+  if (g.inMerge) add('git', task?.step === 'git' ? task.text : '병합 마무리', 'wait');
+  else if (g.dirty > 0) {
+    add('git', level != null && level >= DIRTY_BLOCKS_FROM ? `미커밋 변경 ${g.dirty}건 커밋` : `미커밋 변경 ${g.dirty}건 (적용 전에 커밋 권장)`, 'wait');
+  } else add('git', '커밋 안 된 변경 없음', 'done');
+
+  if (task?.step === 'banned') add('banned', task.text, 'now');
+
+  if (!hasPkg) add('install', '의존성 설치 — package.json 없음', 'skip');
+  else add('install', '의존성 설치', deps?.needsInstall ? 'wait' : 'done');
+
+  if (syncDue(repo, pendingSync)) add('sync', `표준 다시 적용 (L${level})`, 'wait');
+
+  if (!hasPkg) add('verify', 'verify — package.json 없음', 'skip');
+  else if (!repo.pkg.scripts?.verify) add('verify', 'verify — L2에서 생김', 'skip');
+  else add('verify', verifyFailedFresh(repo, job) ? 'verify 실패' : 'verify 통과', verifyPassedFresh(repo, job) ? 'done' : 'wait');
+
+  if (level != null && level >= TOP_LEVEL) add('level', `최고 레벨 (L${TOP_LEVEL + 1} 준비 중)`, 'done');
+  else add('level', level == null ? 'L0 등록' : `L${level + 1}로 올리기`, 'wait');
+
+  return out;
 }

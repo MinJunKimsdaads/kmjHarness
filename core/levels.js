@@ -111,3 +111,16 @@ export const LEVELS = [
 
 export const RISK_LABEL = { none: '위험 없음', low: '낮음', medium: '중간', high: '높음' };
 export const levelById = (id) => LEVELS.find((l) => l.id === id) ?? LEVELS[0];
+
+// 구현된 가장 높은 레벨. 이보다 높은 레벨은 계획도 적용도 하지 않는다.
+export const TOP_LEVEL = Math.max(...LEVELS.filter((l) => l.implemented).map((l) => l.id));
+
+// 사람이나 요청이 준 레벨 값을 확인한다. 정수 0..TOP_LEVEL 만 받는다.
+// 반환: { ok: true, level } 또는 { ok: false, error }
+export function checkLevel(value) {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (!Number.isInteger(n)) return { ok: false, error: `레벨은 0~${TOP_LEVEL} 사이의 정수여야 합니다 (받은 값: ${JSON.stringify(value) ?? '없음'})` };
+  if (n < 0 || n > LEVELS[LEVELS.length - 1].id) return { ok: false, error: `레벨은 0~${TOP_LEVEL} 사이여야 합니다 (받은 값: ${n})` };
+  if (n > TOP_LEVEL) return { ok: false, error: `L${n} 단계는 아직 구현되지 않았습니다. 지금은 L${TOP_LEVEL}까지 올릴 수 있습니다.` };
+  return { ok: true, level: n };
+}

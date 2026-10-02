@@ -6,8 +6,26 @@ import { readWorkspace, writeWorkspace, harnessVersion } from './registry.js';
 
 export const hash = (text) => crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
 
+// 쓰면 안 되는 상태면 이유를, 아니면 null 을 돌려준다. CLI · 서버 · 대시보드가 같은 판단을 쓴다.
+export function applyBlocker(repo) {
+  const g = repo.git;
+  if (g?.inMerge) {
+    return g.conflicted > 0
+      ? `머지 충돌 ${g.conflicted}개 파일이 남아 있습니다. 충돌을 해결해 커밋(또는 git merge --abort)한 뒤에 적용하세요.`
+      : '병합·리베이스 등이 아직 끝나지 않았습니다. 마무리(커밋 또는 --continue)하거나 --abort 한 뒤에 적용하세요.';
+  }
+  return null;
+}
+
+export class ApplyBlockedError extends Error {
+  constructor(message) { super(message); this.code = 'APPLY_BLOCKED'; }
+}
+
 export function applyPlan(repo, plan) {
   if (plan.unavailable) throw new Error(plan.reason || '적용할 수 없는 계획입니다');
+  // 병합이 끝나지 않은 레포에는 절대 쓰지 않는다 (git 상태를 모르는 레포 객체는 검사하지 않는다)
+  const blocked = applyBlocker(repo);
+  if (blocked) throw new ApplyBlockedError(blocked);
 
   const written = [];
   const managed = {};

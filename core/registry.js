@@ -21,7 +21,10 @@ export const excludedNames = (ws = readWorkspace()) =>
 
 export function setExcluded(name, excluded) {
   const ws = readWorkspace();
-  const cur = new Set(excludedNames(ws));
+  const before = excludedNames(ws);
+  // 바뀐 게 없으면 workspace.json 을 다시 쓰지 않는다
+  if (before.includes(name) === Boolean(excluded)) return [...before].sort();
+  const cur = new Set(before);
   if (excluded) cur.add(name); else cur.delete(name);
   ws.exclude = [...cur].sort();
   writeWorkspace(ws);

@@ -69,15 +69,15 @@
 
   /* 레포 표 — 레포마다 tbody 하나 (줄 + 펼침) */
   table.repos { width:100%; border-collapse:separate; border-spacing:0; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
-  table.repos th { white-space:nowrap; text-align:left; font-weight:600; font-size:12px; color:var(--sub); padding:10px 14px; background:var(--soft); border-bottom:1px solid var(--line); }
-  table.repos td { padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:middle; }
-  table.repos tbody:last-of-type tr:last-child td { border-bottom:0; }
+  table.repos > thead th { white-space:nowrap; text-align:left; font-weight:600; font-size:12px; color:var(--sub); padding:10px 14px; background:var(--soft); border-bottom:1px solid var(--line); }
+  table.repos > tbody > tr > td { padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  table.repos > tbody:last-of-type > tr:last-child > td { border-bottom:0; }
   tr.repo { cursor:pointer; }
   tr.repo:hover td { background:var(--hover); }
   tr.repo.sel td { background:var(--sel); }
   .name { font-weight:600; }
   .meta { color:var(--sub); font-size:12px; }
-  .meta .run { color:var(--accent); font-weight:600; }
+  .meta .running { color:var(--accent); font-weight:600; }
   .lv { display:flex; align-items:center; gap:6px; }
   .bar { display:flex; gap:2px; }
   .bar i { width:14px; height:8px; border-radius:2px; background:var(--lvoff); }
@@ -87,7 +87,7 @@
   .st.ok { background:var(--okbg); color:var(--ok); } .st.err { background:var(--errbg); color:var(--err); }
   .st.warn { background:var(--warnbg); color:var(--warn); } .st.none { background:var(--soft); color:var(--sub); }
   .st.sm { width:18px; height:18px; font-size:11px; }
-  .todo { display:flex; align-items:center; gap:8px; }
+  .todo { display:flex; align-items:center; gap:8px; min-width:0; }
   .tag { font-size:11.5px; border-radius:4px; padding:1px 6px; font-weight:600; white-space:nowrap; }
   .tag.block { background:var(--errbg); color:var(--err); }
   .tag.do { background:var(--warnbg); color:var(--warn); }
@@ -96,8 +96,34 @@
   td.act { text-align:right; white-space:nowrap; }
   .loadtxt { color:var(--faint); font-size:12.5px; }
 
+  /* 좁은 화면 — 표 대신 카드. 가로 스크롤이 생기지 않게 한다 */
+  @media (max-width:720px) {
+    header { flex-wrap:wrap; gap:8px 12px; padding:10px 14px; }
+    header .ws { order:3; flex-basis:100%; }
+    .tabs { margin-left:0; }
+    main { padding:14px 12px 40px; }
+    .levels { grid-template-columns:1fr; }
+    .chip { min-width:0; flex:1 1 calc(50% - 12px); }
+    table.repos, table.repos > tbody, table.repos > tbody > tr.drawer, table.repos > tbody > tr.drawer > td { display:block; width:100%; }
+    table.repos > thead { display:none; }
+    table.repos > tbody > tr.repo { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:8px 10px; align-items:center;
+                          padding:12px 14px; border-bottom:1px solid var(--line); }
+    table.repos > tbody > tr.repo > td { display:block; padding:0; border:0; background:none !important; min-width:0; }
+    tr.repo:hover, tr.repo.sel { background:var(--hover); }
+    tr.repo.sel { background:var(--sel); }
+    tr.repo td:nth-child(1) { grid-column:1 / 3; grid-row:1; }
+    tr.repo td:nth-child(2) { grid-column:3; grid-row:1; }
+    tr.repo td:nth-child(3) { grid-column:1; grid-row:2; }
+    tr.repo td:nth-child(4) { grid-column:2 / 4; grid-row:2; }
+    tr.repo td.act { grid-column:1 / 4; grid-row:3; text-align:left; }
+    tr.repo td.act:empty { display:none; }
+    .dr { padding:12px 14px 16px; }
+    .files .row { flex-wrap:wrap; }
+    .files .n { flex-basis:100%; padding-left:42px; }
+  }
+
   /* 펼침 */
-  tr.drawer td { background:var(--drawer); padding:0; }
+  tr.drawer > td { background:var(--drawer); padding:0; }
   .dr { padding:16px 20px 20px; display:grid; grid-template-columns:1.3fr 1fr; gap:20px; }
   @media (max-width:820px) { .dr { grid-template-columns:1fr; } }
   .dr h3 { font-size:13px; margin:0 0 8px; }
@@ -310,7 +336,7 @@ async function fetchDetails(names, gen) {
       const name = queue.shift();
       try { const d = await getDetail(name); if (gen !== GEN) return; DETAIL[name] = d; syncListFrom(d); }
       catch (e) { if (gen !== GEN) return; DETAIL[name] = { error: e.message }; }
-      renderRow(name); renderSummary();
+      renderRow(name); renderSummary(); watchJob(name);
     }
   };
   await Promise.all([worker(), worker(), worker()]);
@@ -328,8 +354,19 @@ async function refreshRepo(name) {
   try { const d = await getDetail(name); DETAIL[name] = d; syncListFrom(d); }
   catch (e) { DETAIL[name] = { error: e.message }; }
   renderRow(name); renderSummary();
-  // 실행 중인 작업이 있으면 끝날 때까지 가끔 다시 본다
-  if (DETAIL[name]?.job?.status === 'running' && !RUNNING.has(name)) setTimeout(() => refreshRepo(name), 3000);
+  watchJob(name);
+}
+
+// 이 페이지 밖에서 시작됐거나(새로고침 전) 이미 돌고 있는 작업은 끝날 때까지 가끔 다시 본다.
+// 레포마다 타이머는 하나만 — '다시 시도'나 새로고침을 여러 번 눌러도 겹치지 않는다.
+const POLLERS = new Map();
+function watchJob(name) {
+  if (POLLERS.has(name) || RUNNING.has(name) || DETAIL[name]?.job?.status !== 'running') return;
+  POLLERS.set(name, setTimeout(async () => {
+    POLLERS.delete(name);
+    await refreshRepo(name);
+    if (!POLLERS.has(name)) sortRows();
+  }, 2000));
 }
 
 // ── 현황: 레벨 카드 · 요약 ───────────────────────────────────
@@ -365,9 +402,13 @@ function renderAllRows() {
   table.insertAdjacentHTML('beforeend', list.map((r) => `<tbody data-name="${esc(r.name)}">${rowHtml(r)}</tbody>`).join(''));
 }
 
+// 줄을 새로 그려도 펼쳐 둔 접힘 부분(<details data-k>)은 그대로 둔다
 function renderRow(name) {
   const t = tbodyOf(name), r = LIST.find((x) => x.name === name);
-  if (t && r) t.innerHTML = rowHtml(r);
+  if (!t || !r) return;
+  const open = new Set([...t.querySelectorAll('details[data-k][open]')].map((d) => d.dataset.k));
+  t.innerHTML = rowHtml(r);
+  for (const d of t.querySelectorAll('details[data-k]')) if (open.has(d.dataset.k)) d.open = true;
 }
 
 // 모든 상세가 도착하면 한 번만 정렬한다 (도착할 때마다 줄이 움직이면 읽기 어렵다)
@@ -390,7 +431,7 @@ function rowHtml(r) {
   const running = d?.job?.status === 'running' || RUNNING.has(r.name);
   const meta = [`${esc(r.profile)}${r.addons?.length ? ' +' + esc(r.addons.join(',')) : ''}`, esc(r.packageManager)];
   if (d?.branch) meta.push(esc(d.branch));
-  if (running) meta.push(`<span class="run">${d?.job?.script === 'install' ? '설치' : '실행'} 중</span>`);
+  if (running) meta.push(`<span class="running">${d?.job?.script === 'install' ? '설치' : '실행'} 중</span>`);
 
   let status, todo, act = '';
   if (!d) {
@@ -437,17 +478,8 @@ function drawerHtml(r, d) {
   for (const f of later) (byLevel[f.sinceLevel] ??= []).push(f);
   const lvName = (id) => META.levels.find((l) => l.id === Number(id));
 
-  const verifyStep = (d.steps || []).find((s) => s.id === 'verify');
-  const top = Math.max(...META.levels.filter((l) => l.implemented).map((l) => l.id));
-  const order = [
-    ['커밋 안 된 변경 정리', !(g.dirty > 0 || g.inMerge)],
-    d.hasPackageJson ? ['의존성 설치', !d.deps.needsInstall] : ['의존성 설치 — package.json 없음', 'skip'],
-    !d.hasPackageJson ? ['verify — package.json 없음', 'skip']
-      : !d.scripts?.verify ? ['verify — L2에서 생김', 'skip']
-      : ['verify 통과', verifyStep?.state === 'done' ? true : d.job?.script === 'verify' && d.job?.status === 'failed' ? false : null],
-    [d.level == null ? 'L0 등록' : d.level < top ? `L${d.level + 1}로 올리기` : `최고 레벨 (L${top + 1} 준비 중)`, d.level != null && d.level >= top],
-  ];
-  const mark = (ok) => (ok === true ? ['', '✓'] : ok === false ? ['now', '→'] : ok === 'skip' ? ['skip', '–'] : ['wait', '○']);
+  // 순서 목록은 서버(core/steps.js 의 orderSteps)가 nowTask 와 같은 데이터로 만든다
+  const MARK = { done:'✓', now:'→', wait:'○', skip:'–' };
   const cur = d.level != null ? lvName(d.level) : null;
   const tcRows = d.toolchain || [];
   const off = tcRows.filter((x) => x.status === 'behind' || x.status === 'missing').length;
@@ -456,14 +488,14 @@ function drawerHtml(r, d) {
     <div>
       <div class="group"><h4>지금 할 일</h4>${now.length ? now.map(itemHtml).join('') : '<div class="dim">없음</div>'}
         ${t.why ? `<div class="f" style="margin-top:6px">${esc(t.why)}</div>` : ''}</div>
-      ${later.length ? `<div class="group"><details><summary>나중에 — 레벨을 올리면 저절로 해결되는 것 ${later.length}개</summary>
+      ${later.length ? `<div class="group"><details data-k="later"><summary>나중에 — 레벨을 올리면 저절로 해결되는 것 ${later.length}개</summary>
         ${Object.entries(byLevel).map(([l, list]) => `<div class="lvh">L${esc(l)}에서${lvName(l)?.implemented ? '' : ' (준비 중)'}</div>${list.map(itemHtml).join('')}`).join('')}</details></div>` : ''}
-      ${note.length ? `<div class="group"><details><summary>참고 ${note.length}개</summary>${note.map(itemHtml).join('')}</details></div>` : ''}
+      ${note.length ? `<div class="group"><details data-k="note"><summary>참고 ${note.length}개</summary>${note.map(itemHtml).join('')}</details></div>` : ''}
     </div>
-    <div class="side"><h3>순서</h3><div class="steps"><ol>${order.map(([s, ok]) => { const [c, m] = mark(ok); return `<li class="${c}"><span class="s">${m}</span>${esc(s)}</li>`; }).join('')}</ol></div>
+    <div class="side"><h3>순서</h3><div class="steps"><ol>${(d.order || []).map((o) => `<li class="${esc(o.state)}"><span class="s">${MARK[o.state] ?? '○'}</span>${esc(o.label)}</li>`).join('')}</ol></div>
       ${cur ? `<p class="dim">지금 L${cur.id} ${esc(cur.label ?? cur.name)} — ${esc(cur.short ?? cur.summary)}</p>` : ''}
       <p class="dim">${esc(d.branch || '브랜치 없음')}${d.lastCommit ? ' · ' + esc(d.lastCommit) : ''}${g.eolNoise ? ` · 줄바꿈 차이만 있는 파일 ${g.eolNoise}개` : ''}</p>
-      ${tcRows.length ? `<details style="margin-top:8px"><summary>버전 비교 — ${off ? `${off}개가 표준과 다름` : '모두 표준과 같음'}</summary>
+      ${tcRows.length ? `<details data-k="versions" style="margin-top:8px"><summary>버전 비교 — ${off ? `${off}개가 표준과 다름` : '모두 표준과 같음'}</summary>
         <table class="tc"><thead><tr><th>패키지</th><th>현재</th><th>표준</th><th></th></tr></thead><tbody>
         ${tcRows.map((x) => `<tr><td>${esc(x.name)}</td><td class="v">${esc(x.current ?? '—')}</td><td class="v">${esc(x.standard ?? '—')}</td><td><span class="vs ${esc(x.status)}">${esc(VS_KO[x.status] ?? x.status)}</span></td></tr>`).join('')}
         </tbody></table></details>` : ''}
@@ -634,11 +666,12 @@ async function runFlow(flow) {
       const s = step('apply'); s.state = 'run'; paintSteps(flow);
       const res = await post('/api/apply', { repo: name, level: flow.level });
       s.state = 'ok'; s.note = `${res.written.length}개 파일 씀${res.removed?.length ? `, ${res.removed.length}개 삭제` : ''}`;
-      // 적용 뒤의 실제 상태로 다음 단계를 정한다
-      const after = await getDetail(name);
-      DETAIL[name] = after; syncListFrom(after);
-      hasPkg = after.hasPackageJson; hasVerify = Boolean(after.scripts?.verify);
-      needInstall = hasPkg && (res.written.includes('package.json') || after.deps.needsInstall);
+      // 적용 뒤의 실제 상태로 다음 단계를 정한다. 새로 읽기에 실패해도 적용 자체는 성공이다.
+      let after = null;
+      try { after = await getDetail(name); DETAIL[name] = after; syncListFrom(after); }
+      catch (e) { s.note += ` · 새로고침 실패 (${e.message}) — 적용은 됐습니다`; }
+      if (after) { hasPkg = after.hasPackageJson; hasVerify = Boolean(after.scripts?.verify); }
+      needInstall = hasPkg && (res.written.includes('package.json') || Boolean(after?.deps?.needsInstall));
       const si = step('install');
       if (!hasPkg) { si.state = 'skip'; si.note = 'package.json 없음'; }
       else if (!needInstall) { si.state = 'skip'; si.note = '설치된 것이 이미 선언과 같음'; }
@@ -666,6 +699,7 @@ async function runFlow(flow) {
   paintSteps(flow);
   // 줄을 먼저 새로 고친 뒤 끝났다고 알린다 (안 그러면 잠깐 동안 줄이 '실행 중'으로 남는다)
   await refreshRepo(name);
+  sortRows();
   if (FLOW === flow) {
     go.hidden = true;
     setNote(failed ? `${failed === 'apply' ? '적용' : failed} 에서 멈췄습니다` : '모두 끝났습니다', failed ? 'err' : 'ok');

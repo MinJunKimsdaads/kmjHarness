@@ -6,6 +6,8 @@ import { toolchain, exists, readJson } from './paths.js';
 import { hash } from './apply.js';
 import { staleDeps } from './deps.js';
 import { resolveLayers } from './profiles.js';
+import { oneShotTest } from './testscript.js';
+import { OP_LABEL } from './scan.js';
 
 
 const REQUIRED_SCRIPTS = ['dev', 'build', 'lint', 'format', 'typecheck', 'test', 'verify'];
@@ -82,10 +84,19 @@ export function diagnose(repo) {
   // — 작업 상태
   const g = repo.git || {};
   if (g.inMerge) {
-    f.push({ id: 'merge-conflict', sinceLevel: 0, severity: 'error',
-      title: `머지 충돌 미해결 — ${g.conflicted}개 파일`,
-      detail: '이 레포는 병합이 끝나지 않은 상태입니다. 충돌을 먼저 해결하기 전에는 하네스를 적용하면 안 됩니다.',
-      fix: '충돌 해결 후 커밋 (또는 git merge --abort)' });
+    if (g.conflicted > 0) {
+      f.push({ id: 'merge-conflict', sinceLevel: 0, severity: 'error',
+        title: `머지 충돌 미해결 — ${g.conflicted}개 파일`,
+        detail: '이 레포는 병합이 끝나지 않은 상태입니다. 충돌을 먼저 해결하기 전에는 하네스를 적용하면 안 됩니다.',
+        fix: '충돌 해결 후 커밋 (또는 git merge --abort)' });
+    } else {
+      // 충돌은 다 풀었지만 아직 커밋(또는 --continue)하지 않은 상태
+      const op = OP_LABEL[g.operation] ?? '병합';
+      f.push({ id: 'merge-conflict', sinceLevel: 0, severity: 'error',
+        title: `${op}이 끝나지 않음 — 커밋 전`,
+        detail: `${op} 중인 레포입니다. 마무리(커밋 또는 --continue)하거나 --abort 하기 전에는 하네스를 적용하면 안 됩니다.`,
+        fix: g.operation === 'merge' || !g.operation ? 'git commit (또는 git merge --abort)' : `git ${g.operation} --continue (또는 --abort)` });
+    }
   }
   if (!g.inMerge && g.dirty > 0) {
     const parts = [];
@@ -128,7 +139,8 @@ export function diagnose(repo) {
     add({ id: 'script-naming', sinceLevel: 2, severity: 'warn', title: "스크립트 이름 불일치: 'type-check'",
       detail: "표준은 'typecheck' 입니다.", fix: 'L2에서 이름 통일' });
   }
-  if (scripts.test && !/\brun\b|--run/.test(scripts.test)) {
+  // 아는 러너(vitest · jest)만 판단한다. node --test 같은 것은 원래 1회 실행이다.
+  if (scripts.test && oneShotTest(scripts.test)) {
     add({ id: 'test-watch', sinceLevel: 2, severity: 'warn', title: "'test'가 watch 모드",
       detail: `현재: ${scripts.test} — 표준은 1회 실행(vitest run)이고 watch는 test:watch 입니다.`, fix: 'L2에서 교정' });
   }

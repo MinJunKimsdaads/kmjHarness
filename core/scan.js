@@ -1,22 +1,70 @@
 // 워크스페이스(github2)를 스캔해 각 레포의 사실을 수집한다. 쓰기 없음.
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { workspaceRoot, harnessRoot, readJson } from './paths.js';
 import { detectProfile, detectAddons, detectPackageManager, collectDeps } from './detect.js';
 import { profileExists } from './profiles.js';
 import { readWorkspace, readRepoConfig, handshake, excludedNames } from './registry.js';
 
-const git = (dir, args) => {
-  try {
-    // trim()을 쓰면 `git status --porcelain` 첫 줄의 선행 공백(' M')이 날아가 상태 판정이 어긋난다.
-    // --no-optional-locks: status 등이 인덱스를 갱신하려고 .git/index.lock 을 만드는 것을 막는다.
-    // 읽기만 하는 도구가 잠금 파일을 남기면, 정리에 실패했을 때 사용자의 git 작업이 통째로 막힌다.
-    return execFileSync('git', ['--no-optional-locks', '-C', dir, ...args],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).replace(/\s+$/, '');
-  } catch { return null; }
+// git 에 묻는 것들. 동기(CLI)와 비동기(대시보드 서버) 두 방식이 같은 목록을 쓰고,
+// 결과 해석은 아래 classifyStatus 하나가 맡는다.
+const GIT_QUERIES = {
+  branch: ['branch', '--show-current'],
+  status: ['status', '--porcelain'],
+  lastCommit: ['log', '-1', '--format=%h %s (%cr)'],
+  remote: ['remote', 'get-url', 'origin'],
+  // 줄바꿈만 다른 파일은 numstat에 잡히지 않는다 → 실제로 내용이 바뀐 것만 남는다.
+  numstat: ['diff', '--ignore-cr-at-eol', '--numstat'],
+  shortstat: ['diff', '--ignore-cr-at-eol', '--shortstat'],
+  // 진행 중인 병합·리베이스·체리픽의 흔적 파일 위치 (워크트리면 절대 경로로 나온다)
+  opPaths: ['rev-parse', ...OP_MARKERS().flatMap(([, f]) => ['--git-path', f])],
 };
+function OP_MARKERS() {
+  return [['merge', 'MERGE_HEAD'], ['rebase', 'rebase-merge'], ['rebase', 'rebase-apply'],
+          ['rebase', 'REBASE_HEAD'], ['cherry-pick', 'CHERRY_PICK_HEAD'], ['revert', 'REVERT_HEAD']];
+}
+export const OP_LABEL = { merge: '병합', rebase: '리베이스', 'cherry-pick': '체리픽', revert: '되돌리기(revert)' };
 
+// trim()을 쓰면 `git status --porcelain` 첫 줄의 선행 공백(' M')이 날아가 상태 판정이 어긋난다.
+// --no-optional-locks: status 등이 인덱스를 갱신하려고 .git/index.lock 을 만드는 것을 막는다.
+// 읽기만 하는 도구가 잠금 파일을 남기면, 정리에 실패했을 때 사용자의 git 작업이 통째로 막힌다.
+const gitArgs = (dir, args) => ['--no-optional-locks', '-C', dir, ...args];
+const clean = (out) => String(out).replace(/\s+$/, '');
+
+function gitFacts(dir) {
+  const out = {};
+  for (const [k, args] of Object.entries(GIT_QUERIES)) {
+    try {
+      out[k] = clean(execFileSync('git', gitArgs(dir, args), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+    } catch { out[k] = null; }
+  }
+  return out;
+}
+
+// 서버용: git 을 기다리는 동안 다른 요청(목록, 다른 레포 상세)이 막히지 않는다.
+const execFileP = promisify(execFile);
+async function gitFactsAsync(dir) {
+  const entries = await Promise.all(Object.entries(GIT_QUERIES).map(async ([k, args]) => {
+    try {
+      const { stdout } = await execFileP('git', gitArgs(dir, args), { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+      return [k, clean(stdout)];
+    } catch { return [k, null]; }
+  }));
+  return Object.fromEntries(entries);
+}
+
+// 진행 중인 git 작업. 충돌 파일을 다 고치고 add 만 한 상태도 '병합 중'이다 — 커밋 전까지는 적용하면 안 된다.
+function operationOf(dir, opPaths) {
+  if (!opPaths) return null;
+  const paths = opPaths.split('\n');
+  const markers = OP_MARKERS();
+  for (let i = 0; i < markers.length; i++) {
+    if (paths[i] && fs.existsSync(path.resolve(dir, paths[i]))) return markers[i][0];
+  }
+  return null;
+}
 
 // `git status --porcelain`의 XY 코드를 사람이 판단할 수 있는 상태로 분류한다.
 // 두 가지를 정확히 하려고 경로 단위 집합으로 센다.
@@ -30,7 +78,8 @@ const pathOf = (line) => {
   return (arrow >= 0 ? rest.slice(arrow + 4) : rest).replace(/^"|"$/g, '');
 };
 
-function classifyStatus(dir, statusRaw) {
+function classifyStatus(dir, facts) {
+  const statusRaw = facts.status;
   const lines = statusRaw ? statusRaw.split('\n').filter(Boolean) : [];
   const conflict = new Set(), untracked = new Set(), staged = new Set(), modified = new Set();
   for (const l of lines) {
@@ -41,14 +90,13 @@ function classifyStatus(dir, statusRaw) {
     if (xy[1] === 'M' || xy[1] === 'D') modified.add(file);
   }
 
-  // 줄바꿈만 다른 파일은 numstat에 잡히지 않는다 → 실제로 내용이 바뀐 것만 남는다.
-  const numstat = git(dir, ['diff', '--ignore-cr-at-eol', '--numstat']) || '';
   const realModified = new Set(
-    numstat.split('\n').filter(Boolean).map((l) => l.split('\t')[2]).filter(Boolean)
+    (facts.numstat || '').split('\n').filter(Boolean).map((l) => l.split('\t')[2]).filter(Boolean)
   );
 
   const eolNoise = [...modified].filter((f) => !realModified.has(f)).length;
   const dirtyPaths = new Set([...conflict, ...untracked, ...staged, ...realModified]);
+  const operation = operationOf(dir, facts.opPaths);
 
   return {
     conflicted: conflict.size,
@@ -58,8 +106,10 @@ function classifyStatus(dir, statusRaw) {
     eolNoise,
     eolOnly: dirtyPaths.size === 0 && eolNoise > 0,
     dirty: dirtyPaths.size,
-    inMerge: conflict.size > 0,
-    summary: git(dir, ['diff', '--ignore-cr-at-eol', '--shortstat']) || null,
+    // 충돌 파일이 남아 있거나, 병합·리베이스·체리픽이 아직 끝나지 않았으면 '병합 중'
+    inMerge: conflict.size > 0 || operation !== null,
+    operation,
+    summary: facts.shortstat || null,
   };
 }
 
@@ -105,21 +155,15 @@ export function quickRepo(name, ws = readWorkspace()) {
   };
 }
 
-export function scanRepo(name) {
-  const { dir, files, pkg, cfg, deps, monorepo, packages, detectedProfile, profile, isGitRepo, excluded, handshake: hs } = baseRepo(name);
-
-  const branch = git(dir, ['branch', '--show-current']);
-  const statusRaw = git(dir, ['status', '--porcelain']);
-  const lastCommit = git(dir, ['log', '-1', '--format=%h %s (%cr)']);
-  const remote = git(dir, ['remote', 'get-url', 'origin']);
-  const gitState = classifyStatus(dir, statusRaw);
-
+function buildRepo(b, facts) {
+  const { dir, files, pkg, cfg, deps, monorepo, packages, detectedProfile, profile, isGitRepo, excluded } = b;
+  const gitState = classifyStatus(dir, facts);
   return {
-    name, dir,
+    name: b.name, dir,
     isGitRepo,
-    remote,
-    branch,
-    lastCommit,
+    remote: facts.remote,
+    branch: facts.branch,
+    lastCommit: facts.lastCommit,
     git: gitState,
     dirtyCount: gitState.dirty,      // UI 호환용 요약값
     eolArtifact: gitState.eolOnly,
@@ -134,9 +178,20 @@ export function scanRepo(name) {
     files,
     config: cfg,
     level: cfg?.level ?? null,
-    handshake: hs,
+    handshake: b.handshake,
     excluded,
   };
+}
+
+export function scanRepo(name) {
+  const b = baseRepo(name);
+  return buildRepo(b, gitFacts(b.dir));
+}
+
+// 대시보드 서버용 — 결과는 scanRepo 와 같고, git 을 비동기로 부른다.
+export async function scanRepoAsync(name) {
+  const b = baseRepo(name);
+  return buildRepo(b, await gitFactsAsync(b.dir));
 }
 
 // 워크스페이스의 레포 폴더 이름들. 하네스 자신과 숨김 폴더, node_modules 는 뺀다.

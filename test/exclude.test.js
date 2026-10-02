@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readWorkspace, writeWorkspace, setExcluded, excludedNames } from '../core/registry.js';
 import { planLevel } from '../core/plan.js';
@@ -73,4 +73,34 @@ test('kmjh exclude / include, list · doctor 는 제외한 폴더를 숨기고 �
   assert.deepEqual(excludedNames(), []);
   assert.match(kmjh('list'), /datafolder/);
   assert.throws(() => execFileSync(process.execPath, [cli, 'exclude', '없는폴더'], { env: process.env, stdio: 'pipe' }));
+});
+
+const run = (...args) => spawnSync(process.execPath, [cli, ...args], { env: process.env, encoding: 'utf8' });
+
+test('include 는 제외 목록에 없는 이름이면 workspace.json 을 다시 쓰지 않는다', () => {
+  writeWorkspace({ repos: {}, exclude: [] });
+  const file = path.join(ws, 'workspace.json');
+  const before = fs.readFileSync(file, 'utf8');
+  fs.utimesSync(file, new Date(0), new Date(0));
+  kmjh('include', 'keep');
+  setExcluded('keep', false);
+  assert.equal(fs.statSync(file).mtimeMs, 0);
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+});
+
+test('CLI: 잘못된 명령 · 없는 레포 · 준비 중인 레벨은 0 이 아닌 값으로 끝난다', () => {
+  for (const args of [['nope'], ['doctor', '없는레포'], ['plan', 'keep', '--to', '4'], ['plan', 'keep', '--to', 'x'],
+    ['promote', 'keep', '--to', '-1', '--apply'], ['plan', '없는레포']]) {
+    const p = run(...args);
+    assert.notEqual(p.status, 0, args.join(' '));
+    assert.ok((p.stderr + p.stdout).trim().length > 0, '이유를 알려준다');
+  }
+  assert.equal(run('help').status, 0);
+  assert.equal(run('--help').status, 0);
+});
+
+test('CLI: 터미널이 아니면 색 코드를 넣지 않는다', () => {
+  for (const args of [['list'], ['doctor'], ['plan', 'keep', '--to', '0']]) {
+    assert.ok(!run(...args).stdout.includes('\x1b['), args.join(' '));
+  }
 });

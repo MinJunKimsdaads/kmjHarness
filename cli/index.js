@@ -3,8 +3,8 @@
 import { scanWorkspace, listRepoNames } from '../core/scan.js';
 import { diagnose } from '../core/doctor.js';
 import { planLevel } from '../core/plan.js';
-import { applyPlan } from '../core/apply.js';
-import { levelById, LEVELS } from '../core/levels.js';
+import { applyPlan, applyBlocker } from '../core/apply.js';
+import { levelById, LEVELS, checkLevel } from '../core/levels.js';
 import { workspaceRoot } from '../core/paths.js';
 import { readWorkspace, writeWorkspace, setExcluded, excludedNames } from '../core/registry.js';
 import { staleDeps } from '../core/deps.js';
@@ -15,7 +15,12 @@ const [, , cmd = 'list', ...rest] = process.argv;
 const flag = (n) => rest.includes(n);
 const arg = () => rest.find((r) => !r.startsWith('-'));
 
-const C = { r: '\x1b[31m', y: '\x1b[33m', g: '\x1b[32m', d: '\x1b[2m', b: '\x1b[1m', x: '\x1b[0m' };
+// 파이프·파일로 내보낼 때(그리고 NO_COLOR 일 때)는 색 코드를 넣지 않는다
+const color = process.stdout.isTTY && !process.env.NO_COLOR;
+const C = color
+  ? { r: '\x1b[31m', y: '\x1b[33m', g: '\x1b[32m', d: '\x1b[2m', b: '\x1b[1m', x: '\x1b[0m' }
+  : { r: '', y: '', g: '', d: '', b: '', x: '' };
+const fail = (msg) => { console.error(msg); process.exit(1); };
 const sevColor = { error: C.r, warn: C.y, info: C.d };
 
 // 한글은 터미널에서 두 칸을 차지한다. padEnd 는 글자 수로 세므로 직접 맞춘다.
@@ -64,6 +69,7 @@ function cmdDoctor() {
   // 이름을 직접 준 경우에는 제외한 폴더라도 보여준다
   const all = scanWorkspace();
   const repos = all.filter((r) => (only ? r.name === only : !r.excluded));
+  if (only && !repos.length) fail(`레포를 찾을 수 없습니다: ${only}`);
   if (flag('--json')) {
     console.log(JSON.stringify(repos.map((r) => ({ ...diagnose(r), meta: r })), null, 2));
     return;
@@ -96,21 +102,28 @@ function cmdExclude(excluded) {
 
 function cmdPlan(apply) {
   const name = arg();
-  if (!name) { console.error('레포 이름이 필요합니다. 예: kmjh promote age-of-sail --to 1'); process.exit(1); }
+  if (!name) fail('레포 이름이 필요합니다. 예: kmjh promote age-of-sail --to 1');
   const repo = scanWorkspace().find((r) => r.name === name);
-  if (!repo) { console.error(`레포를 찾을 수 없습니다: ${name}`); process.exit(1); }
+  if (!repo) fail(`레포를 찾을 수 없습니다: ${name}`);
   const toIdx = rest.indexOf('--to');
-  const target = toIdx >= 0 ? Number(rest[toIdx + 1]) : (repo.level ?? -1) + 1;
+  // --to 는 정수 0..구현된 최고 레벨만 받는다 (L4 처럼 준비 중인 레벨은 거부)
+  const check = checkLevel(toIdx >= 0 ? rest[toIdx + 1] : (repo.level ?? -1) + 1);
+  if (!check.ok) fail(check.error);
+  const target = check.level;
   const lv = levelById(target);
   const plan = planLevel(repo, target);
 
   console.log(`\n${C.b}${repo.name}${C.x} → ${C.b}${lv.name}${C.x}  ${C.d}${lv.summary}${C.x}\n`);
   for (const a of plan.actions) {
-    const mark = { create: `${C.g}+ 생성${C.x}`, update: `${C.y}~ 수정${C.x}`, merge: `${C.y}~ 병합${C.x}`, skip: `${C.d}· 건너뜀${C.x}` }[a.kind];
+    const mark = { create: `${C.g}+ 생성${C.x}`, update: `${C.y}~ 수정${C.x}`, merge: `${C.y}~ 병합${C.x}`,
+      delete: `${C.r}- 삭제${C.x}`, skip: `${C.d}· 건너뜀${C.x}` }[a.kind];
     console.log(`  ${mark}  ${a.rel}${a.note ? C.d + '   ' + a.note + C.x : ''}`);
   }
   console.log(`\n  ${plan.changed}개 파일 변경 예정`);
+  const blocked = applyBlocker(repo);
+  if (blocked) console.log(`  ${C.r}적용할 수 없음${C.x} — ${blocked}`);
   if (!apply) { console.log(`  ${C.d}실제 적용: kmjh promote ${name} --to ${target} --apply${C.x}\n`); return; }
+  if (blocked) process.exit(1);
   const res = applyPlan(repo, plan);
   console.log(`\n  ${C.g}적용 완료${C.x} — ${res.written.length}개 파일, workspace.json 등록됨\n`);
 }
@@ -163,4 +176,6 @@ const commands = {
 `),
 };
 
-(commands[cmd] || commands.help)();
+if (cmd === '--help' || cmd === '-h') commands.help();
+else if (!Object.hasOwn(commands, cmd)) { console.error(`알 수 없는 명령입니다: ${cmd}`); commands.help(); process.exit(1); }
+else commands[cmd]();

@@ -6,6 +6,7 @@ import { harnessRoot, readJson, toolchain } from './paths.js';
 import { harnessVersion } from './registry.js';
 import { levelById } from './levels.js';
 import { profileFragments, profileFile, resolveLayers } from './profiles.js';
+import { oneShotTest, testRunner } from './testscript.js';
 
 const BEGIN = '<!-- kmjharness:begin — kmjh가 관리합니다. 직접 수정하지 마세요 -->';
 const END = '<!-- kmjharness:end -->';
@@ -120,8 +121,10 @@ function transformPackage(repo, level) {
 
     // test 가 watch 모드면 verify 가 CI에서 영원히 멈춘다. 이건 반드시 고쳐야 한다.
     // 원래 값은 test:watch 로 보존하므로 잃는 것이 없다.
-    if (s.test && !/\brun\b/.test(s.test)) {
-      const oneShot = s['test:run'] || s.test.replace(/^(\S+)/, '$1 run');
+    // 아는 러너(vitest · jest)만 고친다 — core/testscript.js 참고. node --test 같은 것은 그대로 둔다.
+    const fixed = s.test ? oneShotTest(s.test) : null;
+    if (fixed) {
+      const oneShot = s['test:run'] || fixed;
       if (!s['test:watch']) { s['test:watch'] = s.test; added.push('test:watch'); }
       notes.push(`test 를 1회 실행으로 교체 ("${s.test}" → "${oneShot}", 원래 값은 test:watch 로 보존) — watch 모드면 verify가 CI에서 멈춘다`);
       s.test = oneShot;
@@ -131,8 +134,11 @@ function transformPackage(repo, level) {
     put('lint:fix', 'eslint . --fix');
     put('format', 'prettier --write .');
     put('format:check', 'prettier --check .');
-    if (s.test) put('test:watch', s.test.replace(/\s+run\b/, ''));
-    put('test:coverage', (s.test || 'vitest run') + ' --coverage');
+    // watch · coverage 변형은 방법을 아는 러너에만 만든다 (모르는 러너에 플래그를 붙이면 깨진 명령이 된다)
+    const runner = testRunner(s.test);
+    if (runner === 'vitest') put('test:watch', s.test.replace(/\s+run\b/, ''));
+    if (runner === 'jest') put('test:watch', `${s.test} --watch`);
+    if (runner === 'vitest' || runner === 'jest' || !s.test) put('test:coverage', (s.test || 'vitest run') + ' --coverage');
 
     const chain = ['lint', 'typecheck', 'test', 'build'].filter((n) => n in s);
     put('verify', chain.map((n) => runCmd(pm, n)).join(' && '));
