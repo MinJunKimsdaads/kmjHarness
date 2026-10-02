@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { workspaceRoot, harnessRoot, readJson } from './paths.js';
 import { detectProfile, detectAddons, detectPackageManager, collectDeps } from './detect.js';
 import { profileExists } from './profiles.js';
-import { readWorkspace, readRepoConfig, handshake } from './registry.js';
+import { readWorkspace, readRepoConfig, handshake, excludedNames } from './registry.js';
 
 const git = (dir, args) => {
   try {
@@ -63,21 +63,14 @@ function classifyStatus(dir, statusRaw) {
   };
 }
 
-function scanRepo(name) {
+// git 을 부르지 않는 빠른 부분 — 파일 몇 개만 읽는다. 대시보드 첫 화면(/api/repos)이 이것만 쓴다.
+function baseRepo(name, ws = readWorkspace()) {
   const dir = path.join(workspaceRoot, name);
   const files = fs.readdirSync(dir);
   const pkg = readJson(path.join(dir, 'package.json'));
   const hasHtml = files.some((f) => f.endsWith('.html'));
   const hasDataOnly = !pkg && !hasHtml;
-
-  const branch = git(dir, ['branch', '--show-current']);
-  const statusRaw = git(dir, ['status', '--porcelain']);
-  const lastCommit = git(dir, ['log', '-1', '--format=%h %s (%cr)']);
-  const remote = git(dir, ['remote', 'get-url', 'origin']);
-  const gitState = classifyStatus(dir, statusRaw);
-
   const cfg = readRepoConfig(name);
-  const ws = readWorkspace();
 
   // 모노레포면 하위 패키지 의존성까지 합쳐서 판정한다. 아니면 루트 package.json 그대로.
   const { deps, monorepo, packages } = collectDeps(dir, pkg);
@@ -87,8 +80,43 @@ function scanRepo(name) {
   const profile = cfg?.profile && profileExists(cfg.profile) ? cfg.profile : detectedProfile;
 
   return {
-    name, dir,
+    name, dir, files, pkg, cfg, deps, monorepo, packages, detectedProfile, profile,
     isGitRepo: files.includes('.git'),
+    excluded: excludedNames(ws).includes(name),
+    handshake: handshake(name, cfg, ws),
+  };
+}
+
+// 대시보드 목록용 요약. git · 진단 · 의존성 설치 상태는 없다 (그건 레포 하나씩 따로 읽는다).
+export function quickRepo(name, ws = readWorkspace()) {
+  const b = baseRepo(name, ws);
+  return {
+    name,
+    level: b.cfg?.level ?? null,
+    profile: b.profile,
+    detectedProfile: b.detectedProfile,
+    addons: detectAddons({ pkg: b.pkg, deps: b.deps }),
+    packageManager: detectPackageManager(b.files),
+    hasPackageJson: Boolean(b.pkg),
+    isGitRepo: b.isGitRepo,
+    monorepo: b.monorepo,
+    handshake: b.handshake,
+    excluded: b.excluded,
+  };
+}
+
+export function scanRepo(name) {
+  const { dir, files, pkg, cfg, deps, monorepo, packages, detectedProfile, profile, isGitRepo, excluded, handshake: hs } = baseRepo(name);
+
+  const branch = git(dir, ['branch', '--show-current']);
+  const statusRaw = git(dir, ['status', '--porcelain']);
+  const lastCommit = git(dir, ['log', '-1', '--format=%h %s (%cr)']);
+  const remote = git(dir, ['remote', 'get-url', 'origin']);
+  const gitState = classifyStatus(dir, statusRaw);
+
+  return {
+    name, dir,
+    isGitRepo,
     remote,
     branch,
     lastCommit,
@@ -106,15 +134,26 @@ function scanRepo(name) {
     files,
     config: cfg,
     level: cfg?.level ?? null,
-    handshake: handshake(name, cfg, ws),
+    handshake: hs,
+    excluded,
   };
 }
 
-export function scanWorkspace() {
+// 워크스페이스의 레포 폴더 이름들. 하네스 자신과 숨김 폴더, node_modules 는 뺀다.
+export function listRepoNames() {
   const harnessName = path.basename(harnessRoot);
-  const entries = fs.readdirSync(workspaceRoot, { withFileTypes: true })
+  return fs.readdirSync(workspaceRoot, { withFileTypes: true })
     .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== harnessName && e.name !== 'node_modules')
     .map((e) => e.name)
     .sort();
-  return entries.map(scanRepo);
+}
+
+// 제외한 폴더도 포함해 모두 돌려준다 (각 레포의 excluded 로 구분). 숨길지는 호출하는 쪽이 정한다.
+export function scanWorkspace() {
+  return listRepoNames().map(scanRepo);
+}
+
+export function quickScanWorkspace() {
+  const ws = readWorkspace();
+  return listRepoNames().map((n) => quickRepo(n, ws));
 }

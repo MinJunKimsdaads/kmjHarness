@@ -74,8 +74,10 @@ function buildAgentsMd(repo, userSection) {
   // 바깥 층(kmjharness.json 의 layers)은 맨 끝에 붙는다. 못 읽은 층은 계획 경고로만 알린다.
   const layers = resolveLayers(repo).filter((l) => l.ok).map((l) => l.fragment);
   const managed = [BEGIN, '', base.trim(), '', frag.trim(), '', ...layers.flatMap((t) => [t, '']), END].join('\n');
+  // 기본 문구도 trim 한다 — 안 하면 처음 만든 AGENTS.md 끝에 빈 줄이 하나 더 생겨,
+  // 바로 다음 계획이 그 빈 줄을 지우려 해서 '표준 다시 적용'이 영영 뜬다.
   const user = (userSection || '').trim()
-    || '## 이 프로젝트만의 규칙\n\n<!-- 여기부터는 당신의 영역입니다. kmjh는 이 아래를 건드리지 않습니다. -->\n';
+    || '## 이 프로젝트만의 규칙\n\n<!-- 여기부터는 당신의 영역입니다. kmjh는 이 아래를 건드리지 않습니다. -->';
   return `# ${repo.name}\n\n${managed}\n\n${user}\n`;
 }
 

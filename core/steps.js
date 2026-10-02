@@ -7,8 +7,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { levelById, LEVELS } from './levels.js';
+import { harnessVersion } from './registry.js';
 
 const mtime = (p) => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } };
+const changedAt = (repo) => (repo.dir
+  ? Math.max(mtime(path.join(repo.dir, 'package.json')), mtime(path.join(repo.dir, 'kmjharness.json')))
+  : 0);
 
 export function nextSteps(repo, deps, job, pendingSync = 0) {
   const steps = [];
@@ -16,8 +20,7 @@ export function nextSteps(repo, deps, job, pendingSync = 0) {
   const next = LEVELS.find((l) => l.id === cur + 1);
 
   // 마지막 변경 시점보다 verify가 이전이면 그 결과는 낡은 것이다
-  const changedAt = Math.max(mtime(path.join(repo.dir, 'package.json')), mtime(path.join(repo.dir, 'kmjharness.json')));
-  const verifyFresh = job && job.script === 'verify' && job.status === 'passed' && (job.endedAt ?? 0) > changedAt;
+  const verifyFresh = job && job.script === 'verify' && job.status === 'passed' && (job.endedAt ?? 0) > changedAt(repo);
 
   if (cur < 0) {
     steps.push({ id: 'promote', label: 'L0 편입', state: 'now', hint: '등록만 합니다. 파일은 건드리지 않습니다.' });
@@ -46,7 +49,7 @@ export function nextSteps(repo, deps, job, pendingSync = 0) {
     state: (!installDone || blockedBySync) ? 'wait' : verifyFresh ? 'done' : 'now',
     hint: verifyFresh ? `${(((job.endedAt ?? Date.now()) - job.startedAt) / 1000).toFixed(1)}초에 통과` :
           job && job.script === 'verify' && job.status === 'failed' ? '지난 실행이 실패했습니다' :
-          job && job.endedAt && job.endedAt <= changedAt ? '마지막 실행 이후 파일이 바뀌었습니다' : '아직 확인하지 않았습니다',
+          job && job.endedAt && job.endedAt <= changedAt(repo) ? '마지막 실행 이후 파일이 바뀌었습니다' : '아직 확인하지 않았습니다',
   });
 
   if (next) {
@@ -61,4 +64,73 @@ export function nextSteps(repo, deps, job, pendingSync = 0) {
   }
 
   return steps;
+}
+
+// ── 지금 할 일 ───────────────────────────────────────────────
+// 레포마다 "지금 할 일" 하나만 고른다. 대시보드 목록과 `kmjh list` 가 같은 답을 내도록 여기 둔다.
+//
+// 우선순위 (위에서 처음 걸리는 것 하나):
+//   1. 머지 충돌         → block   사람이 직접 풀어야 한다. 하네스는 손대지 않는다.
+//   2. 금지 의존성        → block   package.json 에서 직접 지워야 한다.
+//   3. 의존성 어긋남      → do      install
+//   4. L3 이상 + 미커밋   → do      먼저 커밋 (버튼 없음). L3부터는 린트·의존성이 바뀌어 섞이면 되돌리기 어렵다.
+//   5. 하네스 버전 지연 · 밀린 표준 → do  현재 레벨 다시 적용 (sync)
+//   6. 마지막 verify 가 (그 뒤로 파일이 바뀌지 않았는데) 실패 → do  고친 뒤 다시 verify
+//      — 실행 기록은 대시보드 서버 메모리에만 있으므로 job 을 넘긴 경우에만 본다 (CLI 는 넘기지 않음)
+//   7. 미편입            → next    L0 등록
+//   8. 구현된 최고 레벨 미만 → next  한 칸 올리기 (구현 안 된 레벨은 절대 권하지 않는다)
+//   9. 그 외             → done
+//
+// 반환: { kind: 'block'|'do'|'next'|'done', text, action: null|'install'|'sync'|'promote'|'verify', toLevel?, why? }
+const TOP_LEVEL = Math.max(...LEVELS.filter((l) => l.implemented).map((l) => l.id));
+const DIRTY_BLOCKS_FROM = 3;
+
+export function nowTask(repo, diagnosis = null, deps = null, { pendingSync = 0, job = null } = {}) {
+  const findings = diagnosis?.findings || [];
+  const has = (id) => findings.find((f) => f.id === id);
+  const g = repo.git || {};
+  const level = repo.level ?? null;
+
+  if (g.inMerge || has('merge-conflict')) {
+    return { kind: 'block', action: null,
+      text: g.conflicted ? `머지 충돌 ${g.conflicted}개 파일 해결하기` : '머지 충돌 해결하기',
+      why: '병합이 끝나지 않은 레포에는 하네스를 적용하지 않습니다. 충돌을 해결해 커밋하거나 git merge --abort 하세요.' };
+  }
+  const banned = has('banned-deps');
+  if (banned) {
+    return { kind: 'block', action: null, text: `${banned.title} 지우기`,
+      why: 'Node 내장 모듈 이름을 흉내 낸 가짜 패키지입니다. package.json 에서 직접 지워 주세요.' };
+  }
+  const needsInstall = deps ? deps.needsInstall : Boolean(has('deps-stale'));
+  if (needsInstall) {
+    const n = deps ? deps.stale.length + deps.missing.length : 0;
+    return { kind: 'do', action: 'install', text: '의존성 설치',
+      why: n ? `package.json 에 적힌 것과 설치된 것이 ${n}개 다릅니다. 이대로면 verify 가 실패합니다.`
+             : 'package.json 에 적힌 것과 설치된 것이 다릅니다.' };
+  }
+  if (level != null && level >= DIRTY_BLOCKS_FROM && g.dirty > 0) {
+    return { kind: 'do', action: null, text: `미커밋 변경 ${g.dirty}건 커밋하기`,
+      why: '하네스 작업과 섞이지 않게 먼저 커밋해 두세요.' };
+  }
+  if (level != null && (repo.handshake?.state === 'stale' || pendingSync > 0)) {
+    const stale = repo.handshake?.state === 'stale';
+    return { kind: 'do', action: 'sync', toLevel: level,
+      text: stale ? `표준 다시 적용 (하네스 ${repo.config?.harness ?? '?'} → ${harnessVersion()})`
+                  : `표준 다시 적용 — ${pendingSync}개 파일이 표준과 다름`,
+      why: `L${level} 을 다시 적용해 하네스의 새 표준을 반영합니다. 레벨은 그대로입니다.` };
+  }
+  if (job && job.script === 'verify' && (job.status === 'failed' || job.status === 'error')
+      && (job.endedAt ?? 0) > changedAt(repo)) {
+    return { kind: 'do', action: 'verify', text: 'verify 실패 고치기',
+      why: '마지막 verify 가 실패했습니다. 원인을 고친 뒤 다시 확인하세요. 통과해야 다음 레벨을 권합니다.' };
+  }
+  if (level == null) {
+    return { kind: 'next', action: 'promote', toLevel: 0, text: 'L0 등록 — 파일을 건드리지 않음',
+      why: levelById(0).short };
+  }
+  if (level < TOP_LEVEL) {
+    return { kind: 'next', action: 'promote', toLevel: level + 1, text: `L${level + 1}로 올리기`,
+      why: levelById(level + 1).short ?? levelById(level + 1).summary };
+  }
+  return { kind: 'done', action: null, text: '할 일 없음' };
 }

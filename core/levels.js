@@ -3,11 +3,14 @@
 // implemented: false 인 레벨은 plan/apply가 거부한다 — 파일은 그대로인데
 // 레벨 숫자만 올라가 대시보드가 거짓말하는 사고를 막기 위한 것.
 //
-// 각 레벨의 detail/writes/risk/after/revert 는 대시보드가 그대로 보여준다.
+// 각 레벨의 detail/writes/risk/after/revert 는 대시보드 설명서 탭이, label/short 는 현황 탭 카드가 그대로 보여준다.
 // 여기가 레벨 설명의 단일 출처다.
 export const LEVELS = [
   {
     id: 0,
+    // 대시보드 현황 탭의 짧은 카드용 (label: 한 단어, short: 한두 문장)
+    label: '등록',
+    short: '하네스 명단에 올리기만 함. kmjharness.json 하나만 생기고 다른 파일은 그대로.',
     name: 'L0 관찰',
     summary: '등록만. 파일을 건드리지 않고 진단만 한다.',
     detail: '레포와 하네스가 서로를 가리키게만 만듭니다. 코드도 설정도 손대지 않으므로 아무것도 깨질 수 없습니다. '
@@ -21,6 +24,8 @@ export const LEVELS = [
   },
   {
     id: 1,
+    label: '기본',
+    short: 'AI 안내문(AGENTS.md)·.editorconfig·검사 워크플로(경고만) 추가. 코드·설정은 그대로.',
     name: 'L1 기본',
     summary: '에이전트 컨텍스트와 공통 파일을 배포. 검증 워크플로는 경고 모드.',
     detail: 'AI 에이전트가 이 레포의 규칙을 알게 만드는 단계입니다. 기존 CLAUDE.md가 있으면 그 내용을 '
@@ -41,6 +46,8 @@ export const LEVELS = [
   },
   {
     id: 2,
+    label: '계약',
+    short: 'verify 등 표준 스크립트, Prettier, 줄바꿈 통일. CI 실패 시 머지가 막힘. 린트 규칙은 그대로.',
     name: 'L2 계약',
     summary: '스크립트 계약(verify) · 포맷터 통일 · 줄바꿈 정규화. 린트 규칙은 그대로 둔다.',
     detail: '이 하네스의 핵심인 verify 스크립트가 생기는 단계입니다. 없는 스크립트만 채우고 '
@@ -61,6 +68,8 @@ export const LEVELS = [
   },
   {
     id: 3,
+    label: '린트',
+    short: 'ESLint를 공용 규칙으로 통일. 새 경고가 생길 수 있음(오류 아닌 경고로 시작). 적용 뒤 install 필수.',
     name: 'L3 린트',
     summary: 'ESLint 9 flat config 통일. 린트 툴체인 상향 + 구식 .eslintrc 제거.',
     detail: '린트 규칙이 실제로 바뀌는 첫 단계라 새 경고나 오류가 나올 수 있습니다. '
@@ -80,6 +89,8 @@ export const LEVELS = [
   },
   {
     id: 4,
+    label: '완전',
+    short: 'React·Vite·Node·pnpm 버전까지 표준에 맞춤. 코드 수정이 필요할 수 있어 브랜치에서. (준비 중)',
     name: 'L4 완전',
     summary: '툴체인 버전까지 완전 일치 (React 19 · Node 22 · pnpm).',
     detail: '프레임워크 메이저 버전을 올리는 단계라 실제 동작이 바뀔 수 있습니다. '

@@ -73,3 +73,11 @@ test('AGENTS.md 의 verify 명령은 패키지 매니저에 맞게 (npm 은 run)
   const pnpm = fakeRepo('pnpmrepo');
   assert.ok(after(planLevel(pnpm, 1), 'AGENTS.md').includes('`pnpm verify`'));
 });
+
+test('같은 레벨을 두 번 계획하면 두 번째는 바뀔 것이 없다 (AGENTS.md 새로 만들 때 포함)', async () => {
+  const { applyPlan } = await import('../core/apply.js');
+  const repo = fakeRepo('idem', { pkg: { name: 'idem', scripts: { test: 'vitest run' } } });
+  applyPlan(repo, planLevel(repo, 1));
+  const again = { ...repo, config: JSON.parse(after(planLevel(repo, 1), 'kmjharness.json')), level: 1 };
+  assert.equal(planLevel(again, 1).changed, 0);
+});

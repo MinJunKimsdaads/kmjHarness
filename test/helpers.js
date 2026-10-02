@@ -6,6 +6,8 @@ import path from 'node:path';
 
 export const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'kmjh-test-'));
 process.env.KMJH_WORKSPACE = ws;
+// 진짜 kmjHarness/workspace.json 을 건드리지 않도록 레지스트리도 임시 폴더로 (파일이라 레포로 잡히지 않는다)
+process.env.KMJH_REGISTRY = path.join(ws, 'workspace.json');
 
 export function write(rel, content) {
   const abs = path.join(ws, rel);
