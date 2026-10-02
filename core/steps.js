@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { levelById, LEVELS, TOP_LEVEL } from './levels.js';
 import { harnessVersion } from './registry.js';
+import { agoKo } from './time.js';
 import { hasEslintConfig, harnessShipsEslint, lintUsesEslint } from './eslintcfg.js';
 
 const mtime = (p) => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } };
@@ -200,6 +201,7 @@ export function orderSteps(repo, deps, task, { pendingSync = 0, job = null } = {
     if (g.ahead == null) add('push', 'GitHub 추적 브랜치 없음', 'skip');
     else if (g.ahead > 0) add('push', `push 필요 (↑${g.ahead})`, 'wait');
     else if (g.behind > 0) add('push', 'GitHub와 맞추기 — pull 뒤', 'wait');
+    else if (g.remoteStale) add('push', `GitHub 확인 필요 — 마지막 확인 ${g.lastFetch ? agoKo(g.lastFetch) : '기록 없음'} (git fetch)`, 'skip');
     else add('push', 'GitHub와 같음', 'done');
   }
 

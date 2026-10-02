@@ -97,7 +97,7 @@ test('doctor 는 info 로만 알리고, "+경고" 에는 세지 않는다', () =
   const d = diagnose({ ...scanRepo('down'), level: 3 });
   const behind = d.findings.find((f) => f.id === 'behind');
   assert.equal(behind.severity, 'info');
-  assert.match(behind.detail, /마지막 fetch .* 기준/);
+  assert.match(behind.detail, /마지막 확인 .* 기준/);
   const up = diagnose({ ...scanRepo('up'), level: 3 });
   assert.equal(up.findings.find((f) => f.id === 'ahead').severity, 'info');
   assert.ok(!otherIssues(d).some((f) => ['behind', 'ahead'].includes(f.id)));
@@ -111,5 +111,23 @@ test('kmjh list 는 브랜치 옆에 ↑N · ↓N 을 보여 준다', () => {
   assert.match(line('down'), /main ±1 ↓2/);
   assert.match(line('down'), /GitHub보다 커밋 2개 뒤처짐/);
   assert.ok(!/[↑↓]/.test(line('same')));
-  assert.match(out, /마지막 fetch 기준/);
+  assert.match(out, /마지막 fetch·pull·push 기준/);
+});
+
+test('push 로 갱신된 원격 정보도 "마지막 확인" 으로 친다 · 오래되면 확인 필요', () => {
+  // up 레포: push 해서 추적 ref 가 방금 바뀜 (FETCH_HEAD 는 없음)
+  git('', 'clone', '-q', '.remotes/origin.git', 'pushed');
+  write('pushed/c.txt', '1\n'); git('pushed', 'add', '-A'); git('pushed', 'commit', '-qm', 'p'); git('pushed', 'push', '-q');
+  const g = scanRepo('pushed').git;
+  assert.deepEqual([g.ahead, g.behind, g.remoteStale], [0, 0, false]);
+  assert.ok(Math.abs(Date.now() - g.lastFetch) < 60_000);
+  // 오래된 경우: 확인 시각을 옛날로 돌린 git 객체로 순서·doctor 확인
+  const r = scanRepo('same');
+  const old = { ...r, git: { ...r.git, lastFetch: Date.now() - 30 * 86400_000, remoteStale: true } };
+  const o = orderSteps(old, noDeps, nowTask(old, diagnose(old), noDeps), {});
+  const p = o.find((s) => s.id === 'push');
+  assert.equal(p.state, 'skip');
+  assert.match(p.label, /확인 필요 — 마지막 확인 30일 전/);
+  assert.ok(diagnose(old).findings.some((f) => f.id === 'remote-stale' && f.severity === 'info'));
+  assert.deepEqual(otherIssues(diagnose(old)), []);
 });

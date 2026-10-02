@@ -25,11 +25,18 @@ const GIT_QUERIES = {
   aheadBehind: ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'],
   upstream: ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
   fetchHead: ['rev-parse', '--git-path', 'FETCH_HEAD'],
+  // 추적 브랜치 ref 가 마지막으로 바뀐 시각 (reflog). fetch·pull 뿐 아니라 push 때도 갱신된다.
+  // FETCH_HEAD 는 push 때 안 바뀌므로 이것과 함께 봐야 "마지막으로 GitHub 정보를 받은 때"가 맞다.
+  upstreamReflog: ['reflog', 'show', '-1', '--date=unix', '--format=%gd', '@{upstream}'],
+  // reflog 가 없을 때(갓 clone 한 레포 등) 추적 ref 파일·packed-refs 의 수정 시각으로 대신한다
+  commonDir: ['rev-parse', '--git-common-dir'],
 };
 function OP_MARKERS() {
   return [['merge', 'MERGE_HEAD'], ['rebase', 'rebase-merge'], ['rebase', 'rebase-apply'],
           ['rebase', 'REBASE_HEAD'], ['cherry-pick', 'CHERRY_PICK_HEAD'], ['revert', 'REVERT_HEAD']];
 }
+// 원격 정보가 이보다 오래되면 '확인 필요'로 본다
+export const REMOTE_STALE_MS = 7 * 24 * 3600 * 1000;
 export const OP_LABEL = { merge: '병합', rebase: '리베이스', 'cherry-pick': '체리픽', revert: '되돌리기(revert)' };
 
 // trim()을 쓰면 `git status --porcelain` 첫 줄의 선행 공백(' M')이 날아가 상태 판정이 어긋난다.
@@ -86,13 +93,26 @@ const pathOf = (line) => {
 // 추적 브랜치와의 차이. 숫자를 못 얻으면(추적 브랜치 없음 · 분리된 HEAD · git 아님) 모두 null.
 function remoteState(dir, facts) {
   const m = /^(\d+)\s+(\d+)$/.exec(facts.aheadBehind || '');
-  let lastFetch = null;
-  if (facts.fetchHead) { try { lastFetch = fs.statSync(path.resolve(dir, facts.fetchHead)).mtimeMs; } catch { /* fetch 한 적 없음 */ } }
+  const times = [];
+  if (facts.fetchHead) { try { times.push(fs.statSync(path.resolve(dir, facts.fetchHead)).mtimeMs); } catch { /* fetch 한 적 없음 */ } }
+  // "refs/remotes/origin/main@{1700000000}" → 초 단위 시각
+  const rl = /@\{(\d+)\}\s*$/.exec(facts.upstreamReflog || '');
+  if (rl) times.push(Number(rl[1]) * 1000);
+  else if (m && facts.commonDir && facts.upstream) {
+    const common = path.resolve(dir, facts.commonDir);
+    for (const f of [path.join(common, 'refs', 'remotes', ...facts.upstream.split('/')), path.join(common, 'packed-refs')]) {
+      try { times.push(fs.statSync(f).mtimeMs); break; } catch { /* 없음 */ }
+    }
+  }
+  // 이름은 lastFetch 지만 뜻은 "마지막으로 원격 정보가 갱신된 때" (fetch · pull · push 중 가장 최근)
+  const lastFetch = times.length ? Math.max(...times) : null;
   return {
     upstream: m ? (facts.upstream || null) : null,
     behind: m ? Number(m[1]) : null,
     ahead: m ? Number(m[2]) : null,
     lastFetch,
+    // 오래 확인하지 않았으면 "GitHub와 같음"을 믿기 어렵다 (숫자가 0이어도)
+    remoteStale: m ? (lastFetch == null || Date.now() - lastFetch > REMOTE_STALE_MS) : null,
   };
 }
 

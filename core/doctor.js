@@ -108,7 +108,12 @@ export function diagnose(repo) {
       detail: `${parts.join(' · ')}${g.summary ? ' —' + g.summary : ''}. 적용 전에 커밋하거나 stash 하는 것을 권합니다.`, fix: '' });
   }
   // GitHub(추적 브랜치)과의 차이 — 정보로만. fetch 는 하지 않으므로 마지막 fetch 시점 기준이다.
-  const asOf = g.lastFetch ? `마지막 fetch ${agoKo(g.lastFetch)} 기준` : 'fetch 기록 없음 — 오래된 숫자일 수 있음';
+  const asOf = g.lastFetch ? `마지막 확인 ${agoKo(g.lastFetch)} 기준` : '확인 기록 없음 — 오래된 숫자일 수 있음';
+  if (g.remoteStale && !(g.behind > 0) && !(g.ahead > 0)) {
+    f.push({ id: 'remote-stale', sinceLevel: 0, severity: 'info', title: 'GitHub 정보가 오래됨',
+      detail: `${g.upstream ?? '추적 브랜치'} 정보를 ${g.lastFetch ? agoKo(g.lastFetch) : '받은 기록이 없습니다'}${g.lastFetch ? '에 마지막으로 받았습니다' : ''}. 그 뒤 다른 곳에서 push 했다면 뒤처져 있을 수 있습니다.`,
+      fix: 'git fetch' });
+  }
   if (g.behind > 0) {
     f.push({ id: 'behind', sinceLevel: 0, severity: 'info', title: `GitHub보다 커밋 ${g.behind}개 뒤처짐`,
       detail: `${g.upstream ?? '추적 브랜치'}에 이 레포에 없는 커밋이 있습니다 (${asOf}).`, fix: 'git pull' });

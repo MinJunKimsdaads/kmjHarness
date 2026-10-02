@@ -81,6 +81,7 @@
   .sync { font-size:11px; font-weight:700; border-radius:4px; padding:0 4px; cursor:help; }
   .sync.up { background:var(--warnbg); color:var(--warn); }
   .sync.down { background:var(--errbg); color:var(--err); }
+  .sync.stale { background:var(--soft, #eee); color:var(--sub); font-weight:500; }
   .lv { display:flex; align-items:center; gap:6px; }
   .bar { display:flex; gap:2px; }
   .bar i { width:14px; height:8px; border-radius:2px; background:var(--lvoff); }
@@ -432,14 +433,15 @@ function agoKo(ms) {
   if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
   return `${Math.floor(s / 86400)}일 전`;
 }
-const fetchAge = (g) => (g?.lastFetch ? `마지막 fetch: ${agoKo(g.lastFetch)}` : 'fetch 기록 없음');
+const fetchAge = (g) => (g?.lastFetch ? `마지막 확인(fetch·pull·push): ${agoKo(g.lastFetch)}` : '확인 기록 없음');
 
 // 브랜치 옆 ↑N(push 안 됨) · ↓N(뒤처짐). 대시보드는 fetch 하지 않으므로 마지막 fetch 기준이다.
 function syncBadges(g) {
   if (!g) return '';
   const up = g.upstream ? ` (${g.upstream})` : '';
   return (g.ahead > 0 ? ` <span class="sync up" title="${esc(`push 안 된 커밋 ${g.ahead}개${up} · ${fetchAge(g)}`)}">↑${g.ahead}</span>` : '')
-    + (g.behind > 0 ? ` <span class="sync down" title="${esc(`GitHub보다 커밋 ${g.behind}개 뒤처짐${up} · ${fetchAge(g)}`)}">↓${g.behind}</span>` : '');
+    + (g.behind > 0 ? ` <span class="sync down" title="${esc(`GitHub보다 커밋 ${g.behind}개 뒤처짐${up} · ${fetchAge(g)}`)}">↓${g.behind}</span>` : '')
+    + (g.remoteStale && !(g.ahead > 0) && !(g.behind > 0) ? ` <span class="sync stale" title="${esc(`GitHub 정보가 오래돼 같은지 알 수 없습니다${up} · ${fetchAge(g)} — 레포에서 git fetch`)}">↕?</span>` : '');
 }
 
 function levelBar(level) {

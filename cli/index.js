@@ -53,7 +53,8 @@ function cmdList() {
     const eol = r.eolArtifact ? ' (줄바꿈 차이만)' : '';
     const dirty = r.dirtyCount ? ` ±${r.dirtyCount}` : '';
     // GitHub(추적 브랜치)과의 차이 — 마지막 fetch 기준
-    const sync = (r.git?.ahead > 0 ? ` ↑${r.git.ahead}` : '') + (r.git?.behind > 0 ? ` ↓${r.git.behind}` : '');
+    const sync = (r.git?.ahead > 0 ? ` ↑${r.git.ahead}` : '') + (r.git?.behind > 0 ? ` ↓${r.git.behind}` : '')
+      + (r.git?.remoteStale && !(r.git?.ahead > 0) && !(r.git?.behind > 0) ? ' ↕?' : '');
     const branch = (r.branch || '—') + dirty + sync + eol;
     const t = taskOf(r);
     console.log(
@@ -65,7 +66,7 @@ function cmdList() {
   }
   console.log('');
   if (repos.some((r) => r.git?.ahead > 0 || r.git?.behind > 0)) {
-    console.log(`  ${C.d}↑ push 안 된 커밋 · ↓ GitHub보다 뒤처진 커밋 (마지막 fetch 기준 — kmjh 는 fetch 하지 않습니다)${C.x}`);
+    console.log(`  ${C.d}↑ push 안 된 커밋 · ↓ GitHub보다 뒤처진 커밋 · ↕? 오래돼 확인 필요 (마지막 fetch·pull·push 기준 — kmjh 는 fetch 하지 않습니다)${C.x}`);
   }
   excludedNote(all.length - repos.length);
   if (all.length !== repos.length) console.log('');
