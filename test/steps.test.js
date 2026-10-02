@@ -106,3 +106,16 @@ test('checkLevel — 정수 0..구현된 최고 레벨만', () => {
   assert.equal(TOP_LEVEL, 3);
   assert.match(checkLevel(4).error, /구현되지 않았/);
 });
+
+test('otherIssues: nowTask 가 다루지 않는 오류·경고만 센다', async () => {
+  const { otherIssues } = await import('../core/steps.js');
+  const d = { findings: [
+    { id: 'deps-stale', severity: 'error', title: '의존성 설치 필요' },
+    { id: 'handshake', severity: 'warn', title: '미편입' },
+    { id: 'lint-not-shared', severity: 'warn', title: '공용 린트 설정이 적용되지 않음' },
+    { id: 'dirty', severity: 'info', title: '미커밋 변경 3건' },
+  ] };
+  const r = otherIssues(d);
+  assert.deepEqual(r.map((x) => x.id), ['lint-not-shared']);
+  assert.deepEqual(otherIssues(null), []);
+});

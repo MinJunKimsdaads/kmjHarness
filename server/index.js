@@ -23,7 +23,7 @@ import { LEVELS, levelById, checkLevel } from '../core/levels.js';
 import { startRun, getJob, jobView, allJobs, TASKS } from '../core/run.js';
 import { toolchainRows } from '../core/versions.js';
 import { staleDeps } from '../core/deps.js';
-import { nextSteps, nowTask, orderSteps } from '../core/steps.js';
+import { nextSteps, nowTask, orderSteps, otherIssues } from '../core/steps.js';
 import { harnessVersion, setExcluded } from '../core/registry.js';
 
 const BODY_LIMIT = 64 * 1024;
@@ -96,6 +96,7 @@ function repoDetail(r) {
     diagnosis, toolchain: toolchainRows(r), deps, pendingSync: pending,
     steps: nextSteps(r, deps, job, pending),
     nowTask: task,
+    otherIssues: otherIssues(diagnosis),
     order: orderSteps(r, deps, task, { pendingSync: pending, job }),
     job: jobSummary(job),
   };

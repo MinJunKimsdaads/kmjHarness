@@ -8,7 +8,7 @@ import { levelById, LEVELS, checkLevel, TOP_LEVEL } from '../core/levels.js';
 import { workspaceRoot } from '../core/paths.js';
 import { readWorkspace, writeWorkspace, setExcluded, excludedNames } from '../core/registry.js';
 import { staleDeps } from '../core/deps.js';
-import { nowTask } from '../core/steps.js';
+import { nowTask, otherIssues } from '../core/steps.js';
 import { startServer } from '../server/index.js';
 
 const [, , cmd = 'list', ...rest] = process.argv;
@@ -38,7 +38,8 @@ const TASK_TAG = { block: `${C.r}[막힘]${C.x}`, do: `${C.y}[먼저]${C.x}`, ne
 function taskOf(r) {
   const deps = staleDeps(r);
   const pending = r.level == null || !levelById(r.level).implemented ? 0 : planLevel(r, r.level).changed;
-  return nowTask(r, diagnose(r), deps, { pendingSync: pending });
+  const diagnosis = diagnose(r);
+  return { ...nowTask(r, diagnosis, deps, { pendingSync: pending }), others: otherIssues(diagnosis) };
 }
 
 function cmdList() {
@@ -56,7 +57,8 @@ function cmdList() {
     console.log(
       pad(r.name, 22) +
       pad((r.profile ?? r.detectedProfile) + (r.detectedAddons.length ? ` +${r.detectedAddons.join(',')}` : ''), 24) +
-      pad(lvl, 8) + pad(r.handshake.label, 18) + pad(branch, 22) + `${TASK_TAG[t.kind]} ${t.text}`
+      pad(lvl, 8) + pad(r.handshake.label, 18) + pad(branch, 22) + `${TASK_TAG[t.kind]} ${t.text}` +
+      (t.others.length ? ` ${C.y}(+경고 ${t.others.length}: ${t.others.map((o) => o.title).join(', ')})${C.x}` : '')
     );
   }
   console.log('');

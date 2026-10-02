@@ -93,6 +93,7 @@
   .tag.do { background:var(--warnbg); color:var(--warn); }
   .tag.next { background:var(--nextbg); color:var(--accent); }
   .tag.done { background:var(--okbg); color:var(--ok); }
+  .tag.more { background:var(--warnbg); color:var(--warn); font-weight:500; cursor:help; }
   td.act { text-align:right; white-space:nowrap; }
   .loadtxt { color:var(--faint); font-size:12.5px; }
 
@@ -442,9 +443,14 @@ function rowHtml(r) {
     todo = `<span class="loadtxt">상태를 읽지 못했습니다 — ${esc(d.error)}</span>`;
     act = `<button class="btn sm" data-act="retry">다시 시도</button>`;
   } else {
-    const [cls, mark] = DOT[t.kind];
+    const more = d.otherIssues || [];
+    // 할 일이 없어도 경고가 남아 있으면 ✓ 대신 주황 점으로 (경고는 막지는 않음)
+    const [cls, mark] = t.kind === 'done' && more.length ? DOT.do : DOT[t.kind];
     status = `<span class="st ${cls}" title="${esc(TAG[t.kind][1])}">${mark}</span>`;
-    todo = `<div class="todo"><span class="tag ${TAG[t.kind][0]}">${TAG[t.kind][1]}</span>${esc(t.text)}</div>`;
+    const moreTag = more.length
+      ? `<span class="tag more" title="${esc(more.map((o) => o.title).join('\n'))} — 줄을 펼치면 자세히">+경고 ${more.length}</span>`
+      : '';
+    todo = `<div class="todo"><span class="tag ${TAG[t.kind][0]}">${TAG[t.kind][1]}</span>${esc(t.text)}${moreTag}</div>`;
     if (t.action) {
       act = `<button class="btn ${t.action === 'promote' ? 'primary' : ''}" data-act="go" ${running ? 'disabled' : ''}>${running ? '실행 중' : BTN[t.action]}</button>`;
     }

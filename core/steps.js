@@ -184,3 +184,12 @@ export function orderSteps(repo, deps, task, { pendingSync = 0, job = null } = {
 
   return out;
 }
+
+// "지금 할 일" 하나에 가려지는 다른 오류·경고. 현황표 한 줄에 "+경고 N" 으로 붙인다.
+// nowTask 가 이미 다루는 것(병합·금지 의존성·설치·핸드셰이크)은 빼고 센다.
+const COVERED = new Set(['merge-conflict', 'banned-deps', 'deps-stale', 'handshake']);
+export function otherIssues(diagnosis) {
+  return (diagnosis?.findings || [])
+    .filter((f) => (f.severity === 'error' || f.severity === 'warn') && !COVERED.has(f.id))
+    .map((f) => ({ id: f.id, severity: f.severity, title: f.title }));
+}
