@@ -65,7 +65,10 @@ const profileOf = (repo) => repo.profile ?? repo.detectedProfile;
 // ── AGENTS.md ───────────────────────────────────────────────
 function buildAgentsMd(repo, userSection) {
   const pm = repo.packageManager === 'none' ? 'npm' : repo.packageManager;
-  const base = (tpl('profiles', 'base', 'AGENTS.base.md') || '').replaceAll('{{PM}}', pm);
+  // npm 은 스크립트를 `npm run verify` 로 불러야 한다 (`npm verify` 는 없는 명령)
+  const base = (tpl('profiles', 'base', 'AGENTS.base.md') || '')
+    .replaceAll('{{VERIFY}}', runCmd(pm, 'verify'))
+    .replaceAll('{{PM}}', pm);
   // 프로파일 조각은 상속 사슬을 따라 조상 → 자손 순으로 이어진다 (profile.json 이 없으면 자기 것 하나).
   const frag = profileFragments(profileOf(repo));
   // 바깥 층(kmjharness.json 의 layers)은 맨 끝에 붙는다. 못 읽은 층은 계획 경고로만 알린다.

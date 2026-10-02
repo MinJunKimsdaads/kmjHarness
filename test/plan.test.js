@@ -66,3 +66,10 @@ test('층 경로: 두 가지 모양, 워크스페이스 밖 거부, 조각 없�
   assert.equal(plan.warnings.filter((w) => w.includes('바깥 층')).length, 2);
   assert.equal(path.dirname(r[0].dir), path.join(ws, 'kmjHackNSlash'));
 });
+
+test('AGENTS.md 의 verify 명령은 패키지 매니저에 맞게 (npm 은 run)', () => {
+  const npm = { ...fakeRepo('npmrepo'), packageManager: 'npm' };
+  assert.ok(after(planLevel(npm, 1), 'AGENTS.md').includes('`npm run verify`'));
+  const pnpm = fakeRepo('pnpmrepo');
+  assert.ok(after(planLevel(pnpm, 1), 'AGENTS.md').includes('`pnpm verify`'));
+});
