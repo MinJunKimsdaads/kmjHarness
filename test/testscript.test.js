@@ -1,4 +1,4 @@
-import { fakeRepo } from './helpers.js';
+import { fakeRepo, write } from './helpers.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { oneShotTest, testRunner } from '../core/testscript.js';
@@ -6,9 +6,11 @@ import { planLevel } from '../core/plan.js';
 import { diagnose } from '../core/doctor.js';
 
 // L2 를 계획했을 때 package.json 의 scripts
+// ESLint 설정이 있는 레포 기준 (설정이 없을 때의 verify 는 lint.test.js 에서 따로 본다)
 const l2 = (testCmd) => {
-  const repo = fakeRepo(`ts-${Math.random().toString(36).slice(2)}`,
-    { pkg: { name: 'x', scripts: { build: 'vite build', ...(testCmd ? { test: testCmd } : {}) } } });
+  const name = `ts-${Math.random().toString(36).slice(2)}`;
+  write(`${name}/eslint.config.js`, 'export default [];\n');
+  const repo = fakeRepo(name, { pkg: { name: 'x', scripts: { build: 'vite build', ...(testCmd ? { test: testCmd } : {}) } } });
   return JSON.parse(planLevel(repo, 2).actions.find((a) => a.rel === 'package.json').after).scripts;
 };
 
@@ -65,4 +67,29 @@ test('doctor 는 아는 러너의 watch 모드만 경고한다', () => {
   assert.ok(finding('jest --watch'));
   assert.equal(finding('node --test'), undefined);
   assert.equal(finding('vitest run'), undefined);
+});
+
+test('vitest --watch/-w 는 플래그를 떼고 run, mocha -w 는 플래그만 뗀다', () => {
+  assert.equal(oneShotTest('vitest --watch'), 'vitest run');
+  assert.equal(oneShotTest('vitest -w --coverage'), 'vitest run --coverage');
+  assert.equal(oneShotTest('vitest run --watch'), 'vitest run');
+  assert.equal(oneShotTest('mocha -w spec/**/*.js'), 'mocha spec/**/*.js');
+  assert.equal(oneShotTest('mocha --watch'), 'mocha');
+  assert.equal(oneShotTest('mocha spec'), null);
+  assert.equal(l2('mocha -w').test, 'mocha');
+  assert.equal(l2('mocha -w')['test:watch'], 'mocha -w');          // 원래 값은 보존
+  assert.equal(l2('vitest --watch').test, 'vitest run');
+  assert.equal(l2('vitest --watch')['test:watch'], 'vitest --watch');
+});
+
+test('react-scripts test 는 고치지 않고, doctor 가 info 로만 알린다', () => {
+  assert.equal(testRunner('react-scripts test'), 'react-scripts');
+  assert.equal(oneShotTest('react-scripts test'), null);
+  assert.equal(l2('react-scripts test').test, 'react-scripts test');
+  const fs = (cmd) => diagnose({ ...fakeRepo(`cra-${Math.random().toString(36).slice(2)}`,
+    { pkg: { name: 'x', scripts: { test: cmd } }, config: { level: 2 } }), handshake: { state: 'linked' } }).findings;
+  const f = fs('react-scripts test').find((x) => x.id === 'test-watch-cra');
+  assert.equal(f.severity, 'info');
+  assert.ok(!fs('react-scripts test').some((x) => x.id === 'test-watch'));
+  assert.equal(fs('react-scripts test --watchAll=false').find((x) => x.id === 'test-watch-cra'), undefined);
 });

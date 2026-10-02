@@ -14,7 +14,8 @@ const log = path.join(ws, '.git-calls.log');
 fs.mkdirSync(bin);
 fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\necho "$*" >> "${log}"\nsleep ${DELAY}\nexit 1\n`, { mode: 0o755 });
 process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
-for (const n of ['r1', 'r2', 'r3']) write(`${n}/package.json`, { name: n });
+// 자기 .git 이 있어야 git 에 묻는다 (core/scan.js) — 빈 .git 폴더로 레포 흉내
+for (const n of ['r1', 'r2', 'r3']) { write(`${n}/package.json`, { name: n }); fs.mkdirSync(path.join(ws, n, '.git')); }
 
 let server, base;
 before(async () => {

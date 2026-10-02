@@ -183,15 +183,20 @@ function buildRepo(b, facts) {
   };
 }
 
+// 자기 .git 이 없는 폴더는 git 에 묻지 않는다. 묻으면 바깥(상위 폴더)의 레포 상태
+// — 브랜치 · 미커밋 · 병합 중 — 를 자기 것처럼 받아 엉뚱하게 막힌다.
+// (.git 은 폴더일 수도, 워크트리·서브모듈처럼 파일일 수도 있다)
+const NO_GIT = Object.fromEntries(Object.keys(GIT_QUERIES).map((k) => [k, null]));
+
 export function scanRepo(name) {
   const b = baseRepo(name);
-  return buildRepo(b, gitFacts(b.dir));
+  return buildRepo(b, b.isGitRepo ? gitFacts(b.dir) : NO_GIT);
 }
 
 // 대시보드 서버용 — 결과는 scanRepo 와 같고, git 을 비동기로 부른다.
 export async function scanRepoAsync(name) {
   const b = baseRepo(name);
-  return buildRepo(b, await gitFactsAsync(b.dir));
+  return buildRepo(b, b.isGitRepo ? await gitFactsAsync(b.dir) : NO_GIT);
 }
 
 // 워크스페이스의 레포 폴더 이름들. 하네스 자신과 숨김 폴더, node_modules 는 뺀다.

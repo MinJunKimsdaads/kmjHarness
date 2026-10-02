@@ -7,6 +7,7 @@ import { harnessVersion } from './registry.js';
 import { levelById } from './levels.js';
 import { profileFragments, profileFile, resolveLayers } from './profiles.js';
 import { oneShotTest, testRunner } from './testscript.js';
+import { hasEslintConfig, harnessShipsEslint, lintUsesEslint } from './eslintcfg.js';
 
 const BEGIN = '<!-- kmjharness:begin — kmjh가 관리합니다. 직접 수정하지 마세요 -->';
 const END = '<!-- kmjharness:end -->';
@@ -108,6 +109,10 @@ function aheadOrEqual(current, standard) {
   return true;                                           // 같으면 그대로
 }
 
+// 하네스가 만드는 verify 문자열. lint 를 넣을지만 다르다.
+const verifyChain = (pm, s, withLint) =>
+  ['lint', 'typecheck', 'test', 'build'].filter((n) => n in s && (withLint || n !== 'lint')).map((n) => runCmd(pm, n)).join(' && ');
+
 function transformPackage(repo, level) {
   const pkg = JSON.parse(JSON.stringify(repo.pkg));
   const pm = repo.packageManager === 'none' ? 'npm' : repo.packageManager;
@@ -117,6 +122,7 @@ function transformPackage(repo, level) {
   if (level >= 2) {
     const added = [];
     const put = (name, value) => { if (!(name in s)) { s[name] = value; added.push(name); } };
+    const userLint = s.lint;                       // 하네스가 넣기 전의 lint (없으면 undefined)
     if (s['type-check'] && !s['typecheck']) put('typecheck', s['type-check']);
 
     // test 가 watch 모드면 verify 가 CI에서 영원히 멈춘다. 이건 반드시 고쳐야 한다.
@@ -140,8 +146,12 @@ function transformPackage(repo, level) {
     if (runner === 'jest') put('test:watch', `${s.test} --watch`);
     if (runner === 'vitest' || runner === 'jest' || !s.test) put('test:coverage', (s.test || 'vitest run') + ' --coverage');
 
-    const chain = ['lint', 'typecheck', 'test', 'build'].filter((n) => n in s);
-    put('verify', chain.map((n) => runCmd(pm, n)).join(' && '));
+    // ESLint 설정이 없으면(L3 전) lint 를 verify 에 넣지 않는다 — 넣으면 verify 가 설정 없음으로 실패해 막힌다.
+    // 설정이 이미 있거나, 이번에 L3로 가서 하네스가 설정을 넣어 주거나, lint 가 ESLint 가 아닌 다른 도구면 넣는다.
+    const lintReady = hasEslintConfig(repo) || (level >= 3 && harnessShipsEslint(repo))
+      || (userLint !== undefined && !lintUsesEslint(userLint));
+    // 이을 스크립트가 하나도 없으면 빈 verify 를 만들지 않는다 (doctor 가 '없음'으로 알린다)
+    if (verifyChain(pm, s, lintReady)) put('verify', verifyChain(pm, s, lintReady));
     if (added.length) notes.push(`스크립트 ${added.length}개 추가: ${added.join(', ')}`);
   }
 
@@ -151,6 +161,14 @@ function transformPackage(repo, level) {
       if (s[k] && /--ext\b/.test(s[k])) { s[k] = s[k].replace(/\s*--ext\s+\S+/g, ''); fixed.push(k); }
     }
     if (fixed.length) notes.push(`${fixed.join(', ')}에서 --ext 제거 (ESLint 9에서 삭제된 옵션)`);
+
+    // L2 가 ESLint 설정이 없어 lint 없이 만든 verify 를, L3가 설정을 넣는 김에 lint 포함으로 바꾼다.
+    // 하네스가 만든 그 문자열 그대로일 때만 — 사람이 고친 verify 는 건드리지 않는다.
+    if ('lint' in s && (hasEslintConfig(repo) || harnessShipsEslint(repo))
+        && s.verify === verifyChain(pm, s, false) && s.verify !== verifyChain(pm, s, true)) {
+      s.verify = verifyChain(pm, s, true);
+      notes.push('verify 에 lint 추가 (L3가 ESLint 설정을 넣으므로)');
+    }
 
     const lt = toolchain().lintToolchain || { add: {}, remove: [] };
     const dev = pkg.devDependencies || (pkg.devDependencies = {});

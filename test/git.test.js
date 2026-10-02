@@ -79,3 +79,23 @@ test('kmjh promote --apply 도 병합 중이면 거부하고 0 이 아닌 값으
   // 미리보기(--apply 없음)는 그대로 보여준다
   assert.equal(kmjh('plan', 'resolved', '--to', '0').status, 0);
 });
+
+test('바깥 레포 안에 든 git 아닌 폴더는 바깥의 git 상태를 물려받지 않는다', () => {
+  // 워크스페이스 자체를 병합 중인 git 레포로 만들 수는 없으니, 병합 중인 레포 안의 하위 폴더를 워크스페이스로 쓰는
+  // 별도 프로세스로 확인한다
+  mergeConflictRepo('outer');
+  write('outer/inner/notes.txt', 'x\n');
+  const code = `
+    const { scanRepo } = await import(${JSON.stringify(new URL('../core/scan.js', import.meta.url).href)});
+    console.log(JSON.stringify(scanRepo('inner')));`;
+  const p = spawnSync(process.execPath, ['--input-type=module', '-e', code],
+    { env: { ...process.env, KMJH_WORKSPACE: path.join(ws, 'outer') }, encoding: 'utf8' });
+  assert.equal(p.status, 0, p.stderr);
+  const r = JSON.parse(p.stdout);
+  assert.equal(r.isGitRepo, false);
+  assert.equal(r.branch, null);
+  assert.equal(r.git.inMerge, false);
+  assert.equal(r.git.dirty, 0);
+  // 바깥 레포 자신은 여전히 병합 중
+  assert.equal(scanRepo('outer').git.inMerge, true);
+});

@@ -104,3 +104,13 @@ test('CLI: 터미널이 아니면 색 코드를 넣지 않는다', () => {
     assert.ok(!run(...args).stdout.includes('\x1b['), args.join(' '));
   }
 });
+
+test('CLI: 이미 L3 인 레포를 --to 없이 plan 하면 안내만 하고 0 으로 끝난다', () => {
+  write('top/kmjharness.json', { harness: '0.0.1', profile: 'data', level: 3 });
+  const p = run('plan', 'top');
+  assert.equal(p.status, 0);
+  assert.match(p.stdout, /이미 구현된 최고 레벨\(L3\)입니다/);
+  assert.equal(run('promote', 'top', '--apply').status, 0);
+  assert.ok(!fs.existsSync(path.join(ws, 'top', 'AGENTS.md')), '아무것도 쓰지 않는다');
+  assert.notEqual(run('plan', 'top', '--to', '4').status, 0);      // 명시적으로 L4 를 달라고 하면 거부
+});

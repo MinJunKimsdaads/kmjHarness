@@ -4,7 +4,7 @@ import { scanWorkspace, listRepoNames } from '../core/scan.js';
 import { diagnose } from '../core/doctor.js';
 import { planLevel } from '../core/plan.js';
 import { applyPlan, applyBlocker } from '../core/apply.js';
-import { levelById, LEVELS, checkLevel } from '../core/levels.js';
+import { levelById, LEVELS, checkLevel, TOP_LEVEL } from '../core/levels.js';
 import { workspaceRoot } from '../core/paths.js';
 import { readWorkspace, writeWorkspace, setExcluded, excludedNames } from '../core/registry.js';
 import { staleDeps } from '../core/deps.js';
@@ -106,6 +106,12 @@ function cmdPlan(apply) {
   const repo = scanWorkspace().find((r) => r.name === name);
   if (!repo) fail(`레포를 찾을 수 없습니다: ${name}`);
   const toIdx = rest.indexOf('--to');
+  // --to 없이 불렀는데 이미 구현된 최고 레벨이면 할 일이 없다 → 안내만 하고 정상 종료(0)
+  if (toIdx < 0 && repo.level != null && repo.level >= TOP_LEVEL) {
+    console.log(`\n  ${repo.name} 은(는) 이미 구현된 최고 레벨(L${TOP_LEVEL})입니다.` +
+      `\n  ${C.d}표준을 다시 적용하려면: kmjh promote ${repo.name} --to ${repo.level} --apply${C.x}\n`);
+    return;
+  }
   // --to 는 정수 0..구현된 최고 레벨만 받는다 (L4 처럼 준비 중인 레벨은 거부)
   const check = checkLevel(toIdx >= 0 ? rest[toIdx + 1] : (repo.level ?? -1) + 1);
   if (!check.ok) fail(check.error);
@@ -167,7 +173,7 @@ const commands = {
   kmjh list                          레포 목록 · 편입 상태 · 지금 할 일
   kmjh scan                          레지스트리 재생성 (클론 직후에 한 번)
   kmjh doctor [repo] [--json]        진단 (쓰기 없음)
-  kmjh plan <repo> [--to N]          무엇이 바뀔지 미리보기
+  kmjh plan <repo> [--to N]          무엇이 바뀔지 미리보기 (--to 없으면 다음 레벨, 이미 L3면 안내만)
   kmjh promote <repo> [--to N] --apply   실제 적용
   kmjh exclude <repo>                이 머신에서 그 폴더를 목록에서 빼기
   kmjh include <repo>                뺀 폴더 다시 넣기

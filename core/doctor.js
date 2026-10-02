@@ -6,7 +6,7 @@ import { toolchain, exists, readJson } from './paths.js';
 import { hash } from './apply.js';
 import { staleDeps } from './deps.js';
 import { resolveLayers } from './profiles.js';
-import { oneShotTest } from './testscript.js';
+import { oneShotTest, testRunner } from './testscript.js';
 import { OP_LABEL } from './scan.js';
 
 
@@ -143,6 +143,13 @@ export function diagnose(repo) {
   if (scripts.test && oneShotTest(scripts.test)) {
     add({ id: 'test-watch', sinceLevel: 2, severity: 'warn', title: "'test'가 watch 모드",
       detail: `현재: ${scripts.test} — 표준은 1회 실행(vitest run)이고 watch는 test:watch 입니다.`, fix: 'L2에서 교정' });
+  }
+
+  // react-scripts test 는 CI 환경변수가 없으면 watch 로 돈다. 하네스가 고치지는 않고 알리기만 한다 (info).
+  if (testRunner(scripts.test) === 'react-scripts' && !/--watchAll=false|--watch=false/.test(scripts.test)) {
+    f.push({ id: 'test-watch-cra', sinceLevel: 2, severity: 'info', title: "'test'가 watch 모드로 돌 수 있음 (react-scripts)",
+      detail: `현재: ${scripts.test} — CI 환경변수가 없으면 watch 모드로 실행돼 verify 가 멈출 수 있습니다. 하네스는 이 스크립트를 고치지 않습니다.`,
+      fix: '필요하면 "react-scripts test --watchAll=false" 로' });
   }
 
   // — Node / 패키지 매니저 고정

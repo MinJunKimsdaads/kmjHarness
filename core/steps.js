@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { levelById, LEVELS, TOP_LEVEL } from './levels.js';
 import { harnessVersion } from './registry.js';
+import { hasEslintConfig, harnessShipsEslint, lintUsesEslint } from './eslintcfg.js';
 
 const mtime = (p) => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } };
 const changedAt = (repo) => (repo.dir
@@ -130,6 +131,14 @@ export function nowTask(repo, diagnosis = null, deps = null, { pendingSync = 0, 
       why: `L${level} 을 다시 적용해 하네스의 새 표준을 반영합니다. 레벨은 그대로입니다.` };
   }
   if (verifyFailedFresh(repo, job)) {
+    // verify 가 ESLint 를 부르는데 설정이 없고, 다음 레벨(L3)이 설정을 넣어 주는 경우 — 그 레벨을 권한다.
+    // (L2 까지만 적용된 레포가 "verify 실패 고치기"에 갇히지 않게)
+    const s = repo.pkg?.scripts || {};
+    if (level != null && level < TOP_LEVEL && level + 1 >= 3 && /\blint\b/.test(s.verify || '')
+        && lintUsesEslint(s.lint) && !hasEslintConfig(repo) && harnessShipsEslint(repo)) {
+      return { kind: 'next', step: 'level', action: 'promote', toLevel: level + 1, text: `L${level + 1}로 올리기`,
+        why: `verify 가 실패한 이유는 아마 ESLint 설정이 없어서입니다. L${level + 1}이 공용 ESLint 설정을 넣어 해결합니다.` };
+    }
     return { kind: 'do', step: 'verify', action: 'verify', text: 'verify 실패 고치기',
       why: '마지막 verify 가 실패했습니다. 원인을 고친 뒤 다시 확인하세요. 통과해야 다음 레벨을 권합니다.' };
   }
