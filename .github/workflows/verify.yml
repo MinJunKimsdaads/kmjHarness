@@ -48,8 +48,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup pnpm
+      # package.json 에 packageManager(예: pnpm@10.34.6)가 있으면 그 버전을 그대로 쓴다.
+      # pnpm/action-setup 은 version 입력과 packageManager 가 둘 다 있으면 서로 다르다며 실패하기 때문.
+      - name: packageManager 확인
+        id: pm
         if: inputs.package-manager == 'pnpm'
+        run: node -e "const p=require('./package.json');console.log('pinned='+(String(p.packageManager||'').startsWith('pnpm@')))" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm (packageManager 버전)
+        if: inputs.package-manager == 'pnpm' && steps.pm.outputs.pinned == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ${{ inputs.working-directory }}/package.json
+
+      - name: Setup pnpm (하네스 기본 버전)
+        if: inputs.package-manager == 'pnpm' && steps.pm.outputs.pinned != 'true'
         uses: pnpm/action-setup@v4
         with:
           version: ${{ inputs.pnpm-version }}
