@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { toolchain, exists, readJson } from './paths.js';
 import { hash } from './apply.js';
+import { managedBlock } from './markers.js';
 import { staleDeps } from './deps.js';
 import { resolveLayers } from './profiles.js';
 import { oneShotTest, testRunner } from './testscript.js';
@@ -39,9 +40,18 @@ export function diagnose(repo) {
   // — 관리 파일 drift (manifest의 해시와 현재 파일 비교)
   const manifest = readJson(path.join(repo.dir, '.kmjharness', 'manifest.json'));
   if (manifest?.files) {
-    const drifted = Object.entries(manifest.files).filter(([rel, h]) => {
-      try { return hash(fs.readFileSync(path.join(repo.dir, rel), 'utf8')) !== h; }
-      catch { return true; }   // 파일이 사라진 것도 drift
+    // manifest 값은 두 가지 모양이다.
+    //   "해시"                         → 파일 전체를 비교
+    //   { hash, scope: 'block' }       → 마커 안쪽만 비교 (AGENTS.md)
+    const drifted = Object.entries(manifest.files).filter(([rel, v]) => {
+      const want = typeof v === 'string' ? v : v?.hash;
+      const scope = typeof v === 'string' ? 'file' : v?.scope;
+      let text;
+      try { text = fs.readFileSync(path.join(repo.dir, rel), 'utf8'); }
+      catch { return true; }                               // 파일이 사라진 것도 drift
+      if (scope !== 'block') return hash(text) !== want;
+      const blk = managedBlock(text);
+      return blk === null || hash(blk) !== want;           // 블록을 통째로 지운 것도 drift
     }).map(([rel]) => rel);
     if (drifted.length) {
       f.push({ id: 'drift', sinceLevel: 0, severity: 'warn', title: `관리 파일이 손으로 수정됨 — ${drifted.length}개`,
@@ -207,6 +217,18 @@ export function diagnose(repo) {
   if (usesSass) {
     add({ id: 'sass', sinceLevel: 3, severity: 'info', title: 'Sass 사용 중',
       detail: '표준은 Tailwind입니다. 기존 코드는 유지하고 신규 컴포넌트만 Tailwind로 작성하세요.', fix: 'src/styles/vendor/ 로 격리' });
+  }
+
+  // — CLAUDE.md 가 AGENTS.md 를 읽는가
+  // 해시로 고정하지 않는 이유: Claude Code 는 import 아래에 도구 전용 지시를 덧붙이는 것을 허용한다.
+  // 그래서 '정확히 같은가'가 아니라 '연결이 살아 있는가'만 본다.
+  const claudeMd = path.join(repo.dir, 'CLAUDE.md');
+  if (exists(path.join(repo.dir, 'AGENTS.md')) && exists(claudeMd)) {
+    if (!/^\s*@AGENTS\.md\s*$/m.test(fs.readFileSync(claudeMd, 'utf8'))) {
+      add({ id: 'claude-import', sinceLevel: 1, severity: 'warn', title: 'CLAUDE.md 가 AGENTS.md 를 읽지 않음',
+        detail: 'Claude Code 는 AGENTS.md 를 직접 읽지 않습니다. @AGENTS.md 한 줄이 없으면 공통 규약이 전달되지 않습니다.',
+        fix: 'CLAUDE.md 에 "@AGENTS.md" 줄 추가 (아래에 Claude 전용 지시를 덧붙이는 것은 괜찮습니다)' });
+    }
   }
 
   // — 공용 린트 설정이 실제로 쓰이고 있는가

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readWorkspace, writeWorkspace, harnessVersion } from './registry.js';
+import { managedBlock } from './markers.js';
 
 export const hash = (text) => crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
 
@@ -39,7 +40,13 @@ export function applyPlan(repo, plan) {
     }
     if (a.after == null) continue;
     // 건너뛴(이미 동일한) 관리 파일도 해시는 기록해야 이후 drift 감지가 성립한다.
-    if (a.managed) managed[a.rel] = hash(a.after);
+    // managed === 'block' 이면 마커 안쪽만 해시한다 (AGENTS.md 의 사용자 영역은 감시 대상이 아니다).
+    if (a.managed === 'block') {
+      const blk = managedBlock(a.after);
+      if (blk) managed[a.rel] = { hash: hash(blk), scope: 'block' };
+    } else if (a.managed) {
+      managed[a.rel] = hash(a.after);
+    }
     if (a.kind === 'skip') continue;
     const abs = path.join(repo.dir, a.rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });

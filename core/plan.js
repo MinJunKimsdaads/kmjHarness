@@ -3,14 +3,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { harnessRoot, readJson, toolchain } from './paths.js';
+import { BEGIN, END } from './markers.js';
 import { harnessVersion } from './registry.js';
 import { levelById } from './levels.js';
 import { profileFragments, profileFile, resolveLayers } from './profiles.js';
 import { oneShotTest, testRunner } from './testscript.js';
 import { hasEslintConfig, harnessShipsEslint, lintUsesEslint } from './eslintcfg.js';
 
-const BEGIN = '<!-- kmjharness:begin — kmjh가 관리합니다. 직접 수정하지 마세요 -->';
-const END = '<!-- kmjharness:end -->';
+
 
 const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return null; } };
 const tpl = (...seg) => read(path.join(harnessRoot, ...seg));
@@ -227,11 +227,12 @@ export function planLevel(repo, targetLevel) {
     const claudeExisting = read(path.join(repo.dir, 'CLAUDE.md'));
     const migrating = Boolean(claudeExisting && claudeExisting.trim() !== '@AGENTS.md' && !read(path.join(repo.dir, 'AGENTS.md')));
 
+    // 'block': 마커 안쪽만 해시한다. 바깥(사용자 영역)은 자유롭게 바뀌어야 하므로.
     acts.push(action(repo, 'AGENTS.md', buildAgentsMd(repo, userSection), 'update',
-      migrating ? '기존 CLAUDE.md 내용을 사용자 영역으로 이관' : '관리 블록만 갱신, 사용자 영역 보존'));
+      migrating ? '기존 CLAUDE.md 내용을 사용자 영역으로 이관' : '관리 블록만 갱신, 사용자 영역 보존', 'block'));
     acts.push(action(repo, 'CLAUDE.md', '@AGENTS.md\n', 'update',
       migrating ? '내용은 AGENTS.md로 옮기고 import 한 줄만 남김' : 'Claude Code 호환용 import'));
-    acts.push(action(repo, '.editorconfig', tpl('profiles', 'base', 'files', '.editorconfig'), 'update', '공통 에디터 설정'));
+    acts.push(action(repo, '.editorconfig', tpl('profiles', 'base', 'files', '.editorconfig'), 'update', '공통 에디터 설정', true));
 
     const cur = readJson(path.join(repo.dir, '.claude', 'settings.json'), {});
     const merged = { ...cur, permissions: { ...(cur.permissions || {}), additionalDirectories: ['../kmjHarness'] } };
