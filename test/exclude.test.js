@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { readWorkspace, writeWorkspace, setExcluded, excludedNames } from '../core/registry.js';
 import { planLevel } from '../core/plan.js';
 import { applyPlan } from '../core/apply.js';
+import { TOP_LEVEL } from '../core/levels.js';
 import { scanWorkspace, quickScanWorkspace } from '../core/scan.js';
 
 const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'cli', 'index.js');
@@ -89,7 +90,7 @@ test('include 는 제외 목록에 없는 이름이면 workspace.json 을 다시
 });
 
 test('CLI: 잘못된 명령 · 없는 레포 · 준비 중인 레벨은 0 이 아닌 값으로 끝난다', () => {
-  for (const args of [['nope'], ['doctor', '없는레포'], ['plan', 'keep', '--to', '4'], ['plan', 'keep', '--to', 'x'],
+  for (const args of [['nope'], ['doctor', '없는레포'], ['plan', 'keep', '--to', String(TOP_LEVEL + 1)], ['plan', 'keep', '--to', 'x'],
     ['promote', 'keep', '--to', '-1', '--apply'], ['plan', '없는레포']]) {
     const p = run(...args);
     assert.notEqual(p.status, 0, args.join(' '));
@@ -105,12 +106,12 @@ test('CLI: 터미널이 아니면 색 코드를 넣지 않는다', () => {
   }
 });
 
-test('CLI: 이미 L3 인 레포를 --to 없이 plan 하면 안내만 하고 0 으로 끝난다', () => {
-  write('top/kmjharness.json', { harness: '0.0.1', profile: 'data', level: 3 });
+test('CLI: 이미 최고 레벨인 레포를 --to 없이 plan 하면 안내만 하고 0 으로 끝난다', () => {
+  write('top/kmjharness.json', { harness: '0.0.1', profile: 'data', level: TOP_LEVEL });
   const p = run('plan', 'top');
   assert.equal(p.status, 0);
-  assert.match(p.stdout, /이미 구현된 최고 레벨\(L3\)입니다/);
+  assert.match(p.stdout, new RegExp(`이미 구현된 최고 레벨\\(L${TOP_LEVEL}\\)입니다`));
   assert.equal(run('promote', 'top', '--apply').status, 0);
   assert.ok(!fs.existsSync(path.join(ws, 'top', 'AGENTS.md')), '아무것도 쓰지 않는다');
-  assert.notEqual(run('plan', 'top', '--to', '4').status, 0);      // 명시적으로 L4 를 달라고 하면 거부
+  assert.notEqual(run('plan', 'top', '--to', String(TOP_LEVEL + 1)).status, 0);   // 없는/준비 중인 레벨은 거부
 });

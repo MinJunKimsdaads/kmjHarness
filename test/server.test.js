@@ -1,4 +1,5 @@
 import { ws, write, mergeConflictRepo } from './helpers.js';
+import { TOP_LEVEL } from '../core/levels.js';
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -128,7 +129,7 @@ test('병합 중인 레포에는 적용하지 않는다 (409)', async () => {
 });
 
 test('레벨은 정수 0..구현된 최고 레벨만', async () => {
-  for (const level of [4, -1, 1.5, '2a', null, undefined, '']) {
+  for (const level of [TOP_LEVEL + 1, -1, 1.5, '2a', null, undefined, '']) {
     for (const p of ['/api/plan', '/api/apply']) {
       const r = await post(p, { repo: 'fresh', level });
       assert.equal(r.status, 400, `${p} ${JSON.stringify(level)}`);

@@ -5,11 +5,18 @@
 name: kmjh verify (warn)
 
 on:
+  # 작업 브랜치에서도 돌려야 한다. main 에만 걸어두면 기능 브랜치는 PR 을 열기 전까지
+  # 아무 검사도 받지 않는다 ('**' 는 모든 브랜치, 태그는 제외).
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+# 같은 ref 에서 새 실행이 생기면 이전 것은 취소한다 (중복 실행 비용을 줄인다)
+concurrency:
+  group: kmjh-verify-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:

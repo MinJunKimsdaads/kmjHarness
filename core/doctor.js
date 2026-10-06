@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { toolchain, exists, readJson } from './paths.js';
 import { hash } from './apply.js';
 import { managedBlock } from './markers.js';
+import { hasStep } from './verifyscript.js';
 import { staleDeps } from './deps.js';
 import { resolveLayers } from './profiles.js';
 import { oneShotTest, testRunner } from './testscript.js';
@@ -243,6 +244,33 @@ export function diagnose(repo) {
         detail: '.kmjharness/eslint.config.js 를 배포했지만 루트 eslint.config.js 가 그것을 import 하지 않습니다. '
               + '지금은 이 레포만의 규칙으로 돌고 있습니다.',
         fix: "루트 eslint.config.js 를 `import harness from './.kmjharness/eslint.config.js'` 로 바꾸기" });
+    }
+  }
+
+  // — L4 강제: 훅이 걸려 있는가, verify 가 포맷까지 보는가
+  if (repo.pkg) {
+    const lefthookRel = 'lefthook.yml';
+    if (!exists(path.join(repo.dir, lefthookRel))) {
+      add({ id: 'hooks-missing', sinceLevel: 4, severity: 'error', title: 'git 훅 설정 없음',
+        detail: '커밋·푸시 순간에는 아무 검사도 돌지 않습니다. CI 에서야 문제를 알게 됩니다.',
+        fix: 'L4에서 lefthook.yml 배포' });
+    } else {
+      // 설정 파일만 있고 설치를 안 하면 훅은 돌지 않는다 (prepare 는 install 때 실행된다)
+      const hook = path.join(repo.dir, '.git', 'hooks', 'pre-commit');
+      let installed = false;
+      try { installed = /lefthook/i.test(fs.readFileSync(hook, 'utf8')); } catch { installed = false; }
+      if (!installed) {
+        add({ id: 'hooks-not-installed', sinceLevel: 4, severity: 'warn', title: '훅이 아직 설치되지 않음',
+          detail: 'lefthook.yml 은 있지만 .git/hooks 에 자리를 잡지 않았습니다. 설정만 있고 실제로는 돌지 않는 상태입니다.',
+          fix: '의존성 설치 (prepare 스크립트가 lefthook install 을 실행합니다)' });
+      }
+    }
+
+    const v = repo.pkg.scripts?.verify;
+    if (v && repo.pkg.scripts?.['format:check'] && !hasStep(v, 'format:check')) {
+      add({ id: 'format-not-in-verify', sinceLevel: 4, severity: 'warn', title: 'verify 가 포맷을 보지 않음',
+        detail: 'format:check 스크립트는 있지만 verify 가 부르지 않습니다. 포맷이 어긋나도 CI 가 통과합니다.',
+        fix: 'L4에서 verify 에 끼워 넣음' });
     }
   }
 

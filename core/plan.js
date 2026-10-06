@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { harnessRoot, readJson, toolchain } from './paths.js';
 import { BEGIN, END } from './markers.js';
+import { insertStep, hasStep } from './verifyscript.js';
 import { harnessVersion } from './registry.js';
 import { levelById } from './levels.js';
 import { profileFragments, profileFile, resolveLayers } from './profiles.js';
@@ -58,6 +59,9 @@ function renderWorkflow(repo, level) {
     .replaceAll('{{PM}}', pm);
 }
 
+// 'none'(락파일 없음)은 npm 으로 본다. 여러 곳에서 쓰므로 한 곳에 둔다.
+const pmOf = (repo) => (repo.packageManager === 'none' ? 'npm' : repo.packageManager);
+
 // 패키지 매니저마다 스크립트 호출 방식이 다르다. npm만 `run`이 필요하다.
 const runCmd = (pm, script) => (pm === 'npm' || pm === 'none' ? `npm run ${script}` : `${pm} ${script}`);
 
@@ -101,7 +105,8 @@ function existingUserSection(repo) {
 const semver = (r) => String(r || '').replace(/^[\^~>=<\s]+/, '').split('.').map((n) => parseInt(n, 10) || 0);
 function aheadOrEqual(current, standard) {
   const c = semver(current), s = semver(standard);
-  if (c[0] !== s[0]) return false;                       // 메이저가 다르면 표준을 따른다
+  // 방향만 본다. 메이저가 달라도 레포가 앞서 있으면 그대로 둔다 —
+  // 표준은 '최소선'이므로 어떤 경우에도 레포를 뒤로 끌어당기지 않는다.
   for (let i = 0; i < 3; i++) {
     if ((c[i] ?? 0) > (s[i] ?? 0)) return true;
     if ((c[i] ?? 0) < (s[i] ?? 0)) return false;
@@ -115,7 +120,7 @@ const verifyChain = (pm, s, withLint) =>
 
 function transformPackage(repo, level) {
   const pkg = JSON.parse(JSON.stringify(repo.pkg));
-  const pm = repo.packageManager === 'none' ? 'npm' : repo.packageManager;
+  const pm = pmOf(repo);
   const s = pkg.scripts || (pkg.scripts = {});
   const notes = [];
 
@@ -153,6 +158,40 @@ function transformPackage(repo, level) {
     // 이을 스크립트가 하나도 없으면 빈 verify 를 만들지 않는다 (doctor 가 '없음'으로 알린다)
     if (verifyChain(pm, s, lintReady)) put('verify', verifyChain(pm, s, lintReady));
     if (added.length) notes.push(`스크립트 ${added.length}개 추가: ${added.join(', ')}`);
+  }
+
+  if (level >= 4) {
+    const tc = toolchain();
+    const et = tc.enforceToolchain || { add: {}, prepare: null };
+    const dev = pkg.devDependencies || (pkg.devDependencies = {});
+    const added4 = [];
+    for (const [name, ver] of Object.entries(et.add)) {
+      if (dev[name] === ver) continue;
+      if (dev[name] && aheadOrEqual(dev[name], ver)) continue;      // 이미 표준 이상이면 둔다
+      dev[name] = ver; added4.push(name);
+    }
+    pkg.devDependencies = Object.fromEntries(Object.entries(dev).sort(([a], [b]) => a.localeCompare(b)));
+    if (added4.length) notes.push(`강제 도구 추가: ${added4.join(', ')}`);
+
+    // lefthook 은 install 뒤 prepare 에서 .git/hooks 에 자리를 잡는다.
+    // '|| true' 는 .git 이 없는 환경(일부 CI·Docker)에서 설치가 통째로 실패하지 않게 한다.
+    if (et.prepare && !s.prepare) { s.prepare = `${et.prepare} || true`; notes.push('prepare 스크립트 추가 (훅 설치)'); }
+
+    // verify 에 format:check 를 '끼워 넣는다' — 기존 스텝은 그대로 둔다
+    if (s.verify && s['format:check'] && !hasStep(s.verify, 'format:check')) {
+      s.verify = insertStep(s.verify, { pm, script: 'format:check', before: 'lint' });
+      notes.push('verify 에 format:check 추가 (기존 스텝 보존)');
+    }
+
+    if (!pkg.engines?.node) {
+      pkg.engines = { ...(pkg.engines || {}), node: `>=${tc.node}` };
+      notes.push(`engines.node 고정 (>=${tc.node})`);
+    }
+    // '지금 쓰는 매니저'를 고정한다. 매니저를 바꾸는 것은 L4 가 할 일이 아니다 (별도 작업).
+    if (!pkg.packageManager && repo.packageManager !== 'none') {
+      const pin = (et.packageManagers || {})[repo.packageManager];
+      if (pin) { pkg.packageManager = pin; notes.push(`packageManager 고정 (${pin})`); }
+    }
   }
 
   if (level >= 3) {
@@ -275,6 +314,35 @@ export function planLevel(repo, targetLevel) {
       }
       warnings.push('적용 후 반드시 의존성을 다시 설치하세요 (pnpm install / npm install). 그 전에는 lint가 실패합니다.');
     }
+  }
+
+  // L4 — 강제. 설정을 '깔아둔' 상태에서 '지켜지는' 상태로 넘어가는 단계다.
+  if (targetLevel >= 4) {
+    const pm = pmOf(repo);
+    const exec = pm === 'pnpm' ? 'pnpm exec' : pm === 'yarn' ? 'yarn' : 'npx';
+    const lintBlock = hasEslintConfig(repo)
+      ? (tpl('profiles', 'base', 'files', 'lefthook.lint.yml') || '').replaceAll('{{EXEC}}', exec).trimEnd()
+      : '    # (이 레포에는 ESLint 설정이 없어 lint 훅을 넣지 않았습니다)';
+
+    const lefthook = (tpl('profiles', 'base', 'files', 'lefthook.yml') || '')
+      .replaceAll('{{EXEC}}', exec)
+      .replaceAll('{{LINT_BLOCK}}', lintBlock)
+      .replaceAll('{{VERIFY_CMD}}', pm === 'npm' || pm === 'none' ? 'npm run verify' : `${pm} verify`);
+    acts.push(action(repo, 'lefthook.yml', lefthook, 'update',
+      'pre-commit: 변경 파일만 포맷·린트 · pre-push: verify 전체', true));
+
+    acts.push(action(repo, '.nvmrc', `${toolchain().node}\n`, 'update', 'Node 버전 고정', true));
+
+    // 포맷 커밋을 blame 에서 건너뛰게 하는 목록. 내용은 레포마다 다르므로 없을 때만 만든다.
+    const blameRel = '.git-blame-ignore-revs';
+    if (!read(path.join(repo.dir, blameRel))) {
+      acts.push(action(repo, blameRel, tpl('profiles', 'base', 'files', 'git-blame-ignore-revs'), 'create',
+        '전체 포맷 커밋을 git blame 에서 건너뛰기 위한 목록'));
+    }
+
+    warnings.push('적용 후 의존성을 설치하면 lefthook 이 .git/hooks 에 자리를 잡습니다 (prepare 스크립트).');
+    warnings.push('훅은 --no-verify 로 건너뛸 수 있습니다. 정말로 막으려면 GitHub branch protection 이 필요합니다 (docs/branch-protection.md).');
+    warnings.push('포맷을 아직 한 번도 적용하지 않았다면 verify 가 format:check 에서 실패합니다 — [포맷 적용] 을 먼저 돌리고, 그 결과는 단독 커밋으로 남기세요.');
   }
 
   // package.json은 여러 레벨이 건드리므로 마지막에 한 번만

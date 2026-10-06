@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { scanRepo, scanRepoAsync } from '../core/scan.js';
 import { diagnose } from '../core/doctor.js';
 import { nowTask, orderSteps, otherIssues } from '../core/steps.js';
+import { TOP_LEVEL } from '../core/levels.js';
 
 const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'cli', 'index.js');
 const noDeps = { stale: [], missing: [], needsInstall: false };
@@ -67,7 +68,7 @@ test('nowTask: 뒤처지면 pull 먼저 (미커밋이 있으면 stash/커밋 안
 
 test('nowTask: push 안 된 커밋은 할 일이 없을 때만, 버튼 없음 (대시보드는 push 하지 않는다)', () => {
   const up = scanRepo('up');
-  const top = { ...up, level: 3, handshake: { state: 'linked' } };
+  const top = { ...up, level: TOP_LEVEL, handshake: { state: 'linked' } };
   const t = nowTask(top, { findings: [] }, noDeps);
   assert.deepEqual([t.kind, t.step, t.action], ['do', 'push', null]);
   assert.equal(t.text, 'push 안 된 커밋 1개 — git push');
@@ -75,11 +76,11 @@ test('nowTask: push 안 된 커밋은 할 일이 없을 때만, 버튼 없음 (�
   // 승급할 게 남아 있으면 그게 먼저
   assert.equal(nowTask({ ...top, level: 1 }, { findings: [] }, noDeps).action, 'promote');
   // 같으면 완료
-  assert.equal(nowTask({ ...scanRepo('same'), level: 3, handshake: { state: 'linked' } }, { findings: [] }, noDeps).kind, 'done');
+  assert.equal(nowTask({ ...scanRepo('same'), level: TOP_LEVEL, handshake: { state: 'linked' } }, { findings: [] }, noDeps).kind, 'done');
 });
 
 test('순서: GitHub 칸이 생기고, "지금" 칸은 nowTask 와 같다', () => {
-  const at = (name, level = 3) => {
+  const at = (name, level = TOP_LEVEL) => {
     const r = { ...scanRepo(name), level, handshake: { state: 'linked' } };
     const task = nowTask(r, { findings: [] }, noDeps);
     return { task, order: orderSteps(r, noDeps, task) };

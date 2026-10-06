@@ -1,0 +1,4 @@
+    lint:
+      glob: '*.{js,jsx,ts,tsx,mjs,cjs}'
+      run: {{EXEC}} eslint --fix {staged_files}
+      stage_fixed: true

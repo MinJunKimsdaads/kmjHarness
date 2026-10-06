@@ -1,0 +1,19 @@
+# kmjHarness가 생성했습니다. 직접 수정하지 마세요 — 변경은 kmjh sync로.
+#
+# 커밋·푸시 순간에 표준이 지켜지는지 본다.
+#   pre-commit — 변경한 파일만 포맷·린트하고 고친 결과를 다시 staged 로 넣는다 (빠르다)
+#   pre-push   — verify 전체. CI 에서 깨지기 전에 여기서 막는다
+#
+# 훅을 잠깐 건너뛰려면: LEFTHOOK=0 git commit ...
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: '*.{js,jsx,ts,tsx,mjs,cjs,json,css,scss,md,yml,yaml,html}'
+      run: {{EXEC}} prettier --write {staged_files}
+      stage_fixed: true
+{{LINT_BLOCK}}
+pre-push:
+  commands:
+    verify:
+      run: {{VERIFY_CMD}}

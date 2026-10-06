@@ -89,23 +89,27 @@ export const LEVELS = [
   },
   {
     id: 4,
-    label: '완전',
-    short: 'React·Vite·Node·pnpm 버전까지 표준에 맞춤. 코드 수정이 필요할 수 있어 브랜치에서. (준비 중)',
-    name: 'L4 완전',
-    summary: '툴체인 버전까지 완전 일치 (React 19 · Node 22 · pnpm).',
-    detail: '프레임워크 메이저 버전을 올리는 단계라 실제 동작이 바뀔 수 있습니다. '
-          + '다른 레벨과 달리 코드 수정이 함께 필요할 가능성이 높으므로, '
-          + '반드시 별도 브랜치에서 진행하고 앱을 직접 실행해 확인해야 합니다.',
+    label: '자동 검사',
+    short: '커밋·푸시 때 자동으로 검사하고, 모든 브랜치에서 CI 가 돈다. 포맷이 verify 에 들어간다.',
+    name: 'L4 자동 검사',
+    summary: '커밋·푸시 순간과 모든 브랜치에서 자동으로 검사한다. 포맷을 verify 에 넣는다.',
+    detail: 'L1~L3 이 "설정을 깔아둔" 단계라면 L4 는 "어긋나면 바로 드러나는" 단계입니다. '
+          + 'git 훅이 커밋할 때 변경한 파일만 빠르게 검사하고, 푸시할 때 verify 전체를 돌립니다. '
+          + '다만 훅은 --no-verify 로 건너뛸 수 있습니다 — 실수를 빨리 알려주는 장치이지 못 지나가게 막는 장치가 아닙니다. '
+          + '정말로 막으려면 GitHub 의 branch protection 이 필요하고, 그건 레포 설정이라 하네스가 대신 켜지 않습니다 '
+          + '(docs/branch-protection.md 참고). 설치된 패키지의 버전은 올리지 않습니다.',
     writes: [
-      'package.json dependencies · devDependencies',
-      '.nvmrc · engines.node',
-      'packageManager 필드',
+      'lefthook.yml — pre-commit(변경 파일만) · pre-push(verify)',
+      'package.json — prettier · lefthook 추가, prepare 스크립트, verify 에 format:check 끼워 넣기',
+      '.nvmrc · engines.node — Node 버전 고정',
+      'packageManager 필드 — 지금 쓰는 매니저로 고정',
+      '.git-blame-ignore-revs — 전체 포맷 커밋을 blame 에서 건너뛰기 (없을 때만)',
     ],
-    keeps: ['소스 코드 (다만 마이그레이션이 필요할 수 있음)'],
-    risk: 'high',
-    after: '설치 → verify → 앱을 실제로 띄워서 눈으로 확인.',
-    revert: '반드시 브랜치를 따로 파고 진행하세요.',
-    implemented: false,
+    keeps: ['소스 코드', '기존 ci.yml', '설치된 패키지의 버전', 'verify 에 넣어 둔 레포 고유 스텝'],
+    risk: 'medium',
+    after: '의존성 설치 → 포맷 1회 적용 → 그 결과를 단독 커밋 → verify. 포맷을 안 돌리면 format:check 에서 멈춥니다.',
+    revert: 'lefthook.yml 과 prepare 스크립트를 지우고 .git/hooks 를 정리하면 됩니다. 소스는 포맷 커밋만 되돌리면 됩니다.',
+    implemented: true,
   },
 ];
 

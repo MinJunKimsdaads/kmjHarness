@@ -47,11 +47,11 @@ test('하네스 버전 지연 또는 밀린 표준이면 현재 레벨 다시 �
   assert.equal(nowTask(repo({ handshake: { state: 'stale' } }), diag(), deps(), { pendingSync: 3 }).toLevel, 0);
 });
 
-test('미편입은 L0, 그다음은 한 칸씩, L3 에서 끝 (L4 는 권하지 않음)', () => {
+test('미편입은 L0, 그다음은 한 칸씩, 최고 레벨에서 끝 (그 위는 권하지 않음)', () => {
   const l0 = nowTask(repo(), diag(), deps());
   assert.deepEqual([l0.kind, l0.action, l0.toLevel], ['next', 'promote', 0]);
-  for (const lv of [0, 1, 2]) assert.equal(nowTask(repo({ level: lv }), diag(), deps()).toLevel, lv + 1);
-  for (const lv of [3, 4]) {
+  for (let lv = 0; lv < TOP_LEVEL; lv++) assert.equal(nowTask(repo({ level: lv }), diag(), deps()).toLevel, lv + 1);
+  for (const lv of [TOP_LEVEL, TOP_LEVEL + 1]) {
     const t = nowTask(repo({ level: lv }), diag(), deps());
     assert.deepEqual([t.kind, t.action], ['done', null]);
   }
@@ -78,14 +78,14 @@ test('순서 목록의 "지금" 칸은 언제나 nowTask 가 고른 칸 하나',
   const pkg = { scripts: { verify: 'x' } };
   const cases = [
     [repo({ level: 1, git: { dirty: 5 }, pkg }), 'level'],          // L3 미만 미커밋은 '지금'이 아니다
-    [repo({ level: 3, git: { dirty: 5 }, pkg }), 'git'],
+    [repo({ level: TOP_LEVEL, git: { dirty: 5 }, pkg }), 'git'],
     [repo({ level: 2, git: { inMerge: true, conflicted: 1 }, pkg }), 'git'],
     [repo({ level: 2, handshake: { state: 'stale' }, pkg }), 'sync'],
     [repo({ level: null, pkg }), 'level'],
   ];
   for (const [r, id] of cases) assert.deepEqual(nowIds(orderOf(r)), [id], JSON.stringify(r));
   assert.deepEqual(nowIds(orderOf(repo({ level: 0, pkg }), deps(2))), ['install']);
-  assert.deepEqual(nowIds(orderOf(repo({ level: 3, pkg }))), []);                       // 완료
+  assert.deepEqual(nowIds(orderOf(repo({ level: TOP_LEVEL, pkg }))), []);               // 완료
 });
 
 test('재적용이 필요하면 순서에 sync 칸이 생기고, 아니면 없다', () => {
@@ -101,10 +101,11 @@ test('재적용이 필요하면 순서에 sync 칸이 생기고, 아니면 없�
 });
 
 test('checkLevel — 정수 0..구현된 최고 레벨만', () => {
-  for (const ok of [0, 1, 2, 3, '2']) assert.equal(checkLevel(ok).ok, true, String(ok));
-  for (const bad of [4, -1, 1.5, NaN, '2a', '', null, undefined, '1e0x']) assert.equal(checkLevel(bad).ok, false, String(bad));
-  assert.equal(TOP_LEVEL, 3);
-  assert.match(checkLevel(4).error, /구현되지 않았/);
+  for (const ok of [...Array(TOP_LEVEL + 1).keys(), '2']) assert.equal(checkLevel(ok).ok, true, String(ok));
+  for (const bad of [TOP_LEVEL + 1, -1, 1.5, NaN, '2a', '', null, undefined, '1e0x']) assert.equal(checkLevel(bad).ok, false, String(bad));
+  assert.ok(Number.isInteger(TOP_LEVEL) && TOP_LEVEL >= 0);
+  // 모든 레벨이 구현되면 '범위 안이지만 미구현'인 값이 없어진다 — 거부 여부와 이유 유무만 확인한다
+  assert.ok(checkLevel(TOP_LEVEL + 1).error.length > 0);
 });
 
 test('otherIssues: nowTask 가 다루지 않는 오류·경고만 센다', async () => {
