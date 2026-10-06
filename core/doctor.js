@@ -247,7 +247,25 @@ export function diagnose(repo) {
     }
   }
 
-  // — L4 강제: 훅이 걸려 있는가, verify 가 포맷까지 보는가
+  // — 포맷 대상에서 빌드 산출물이 빠져 있는가
+  // 빠져 있지 않으면 빌드한 뒤 format:check 가 반드시 실패한다 (minified 파일은 포맷이 안 맞는다).
+  const ignorePath = path.join(repo.dir, '.prettierignore');
+  if (repo.pkg?.scripts?.['format:check']) {
+    const lines = exists(ignorePath)
+      ? fs.readFileSync(ignorePath, 'utf8').split('\n').map((l) => l.trim().replace(/\/$/, '')).filter((l) => l && !l.startsWith('#'))
+      : [];
+    const outDirs = ['dist', 'build', 'coverage', 'out', '.next'].filter((d) => exists(path.join(repo.dir, d)));
+    const missing = outDirs.filter((d) => !lines.includes(d));
+    if (missing.length) {
+      add({ id: 'prettierignore', sinceLevel: 2, severity: 'warn', title: `포맷 대상에서 빌드 산출물이 안 빠짐 — ${missing.join(', ')}`,
+        detail: exists(ignorePath)
+          ? `.prettierignore 에 ${missing.join(', ')} 가 없습니다. 빌드한 뒤 format:check 가 실패합니다.`
+          : '.prettierignore 가 없습니다. prettier 가 빌드 산출물까지 포맷하고, 빌드 뒤 format:check 가 실패합니다.',
+        fix: `.prettierignore 에 ${missing.join(', ')} 추가` });
+    }
+  }
+
+  // — L4 자동 검사: 훅이 걸려 있는가, verify 가 포맷까지 보는가
   if (repo.pkg) {
     const lefthookRel = 'lefthook.yml';
     if (!exists(path.join(repo.dir, lefthookRel))) {

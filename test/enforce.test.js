@@ -103,3 +103,32 @@ test('doctor: verify 가 format:check 를 부르지 않으면 알려준다', () 
   const f = diagnose(scanRepo(name)).findings.find((x) => x.id === 'format-not-in-verify');
   assert.equal(f?.severity, 'warn');
 });
+
+test('.prettierignore 는 없을 때만 만들고, 이미 있으면 건드리지 않는다', () => {
+  const made = planLevel(fakeRepo('e-ig1', { pkg: base }), 2).actions.find((a) => a.rel === '.prettierignore');
+  assert.equal(made.kind, 'create');
+  for (const d of ['dist', 'build', 'coverage']) assert.match(made.after, new RegExp(`^${d}$`, 'm'));
+
+  write('e-ig2/.prettierignore', 'node_modules\ndist\n# 이 레포만의 예외\ngenerated\n');
+  const repo = { ...fakeRepo('e-ig2', { pkg: base }), files: fs.readdirSync(path.join(ws, 'e-ig2')) };
+  const act = planLevel(repo, 2).actions.find((a) => a.rel === '.prettierignore');
+  assert.equal(act, undefined, '이미 있으면 계획에 아예 올리지 않는다');
+});
+
+test('doctor: 빌드 산출물이 포맷 대상에서 안 빠지면 알려준다', () => {
+  const name = 'e-ig3';
+  const pkg = { ...base, scripts: { ...base.scripts, 'format:check': 'prettier --check .' } };
+  write(`${name}/package.json`, pkg);
+  write(`${name}/kmjharness.json`, { harness: '0.0.1', profile: 'react-vite', level: 2 });
+  fs.mkdirSync(path.join(ws, name, 'dist'), { recursive: true });
+  write(`${name}/dist/app.js`, 'x');
+
+  const f = () => diagnose(scanRepo(name)).findings.find((x) => x.id === 'prettierignore');
+  assert.match(f()?.title ?? '', /dist/, '.prettierignore 가 없으면 알린다');
+
+  write(`${name}/.prettierignore`, 'node_modules\n');
+  assert.match(f()?.title ?? '', /dist/, 'dist 가 빠져 있으면 알린다');
+
+  write(`${name}/.prettierignore`, 'node_modules\ndist/\n');
+  assert.equal(f(), undefined, 'dist/ 처럼 슬래시가 붙어도 인정한다');
+});

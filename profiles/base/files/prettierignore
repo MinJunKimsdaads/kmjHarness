@@ -1,0 +1,21 @@
+# 포맷하지 않을 것들. 이 파일은 '없을 때만' 만들어집니다 — 레포마다 더할 것이 다르므로
+# 생긴 뒤에는 하네스가 건드리지 않습니다. 다만 빌드 산출물이 빠지면 doctor 가 알려줍니다.
+#
+# 빌드 산출물을 빼야 하는 이유: 빌드한 뒤에는 verify 가 format:check 에서 실패합니다.
+node_modules
+dist
+build
+coverage
+.vite
+.next
+out
+
+# 락파일은 도구가 만든 그대로 둔다
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# kmjh 가 관리하는 파일은 하네스가 쓴 그대로 둔다
+.kmjharness
+.claude
+kmjharness.json

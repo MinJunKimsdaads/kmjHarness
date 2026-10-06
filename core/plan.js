@@ -289,6 +289,14 @@ export function planLevel(repo, targetLevel) {
     acts.push(action(repo, '.prettierrc', tpl('profiles', 'base', 'files', 'prettierrc.json'), 'update', '공통 포맷 규칙', true));
     acts.push(action(repo, '.gitattributes', tpl('profiles', 'base', 'files', 'gitattributes'), 'update',
       '줄바꿈 정규화 — "줄바꿈만 다른데 변경돼 보이는" 현상을 없앤다', true));
+
+    // 레포마다 뺄 것이 달라 '없을 때만' 만든다. 생긴 뒤에는 각자 영역이고,
+    // 빌드 산출물이 빠지면 doctor 가 알려준다 (빌드 뒤 format:check 가 실패하므로).
+    const ignoreRel = '.prettierignore';
+    if (!read(path.join(repo.dir, ignoreRel))) {
+      acts.push(action(repo, ignoreRel, tpl('profiles', 'base', 'files', 'prettierignore'), 'create',
+        '포맷에서 뺄 것 — 빌드 산출물·락파일·관리 파일'));
+    }
   }
 
   // L3 — ESLint 9 flat config
